@@ -1218,12 +1218,12 @@ async def on_ready():
         print(f"[Economy Bot] ❌ Sync failed: {e}")
 
     # Optionally, also sync to your main server instantly (remove if not needed):
-    # MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
-    # try:
-    #     guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
-    #     print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
-    # except Exception as e:
-    #     print(f"[Economy Bot] Guild sync failed: {e}")
+    MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
+    try:
+        guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
+        print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
+    except Exception as e:
+        print(f"[Economy Bot] Guild sync failed: {e}")
 
     for guild in bot.guilds:
         try:
