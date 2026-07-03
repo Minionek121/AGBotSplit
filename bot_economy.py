@@ -1210,20 +1210,21 @@ async def on_ready():
     await load_disabled_commands()
     await load_prefix_restrictions()
     bot.add_view(StatsChannelView())
- 
-    ok, fail = 0, 0
-    for guild in bot.guilds:
-        try:
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            ok += 1
-        except discord.HTTPException as e:
-            print(f"[Economy Sync] ❌ {guild.name}: {e}")
-            fail += 1
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print(f"[Economy Bot] Synced {ok} ok / {fail} failed. Logged in as {bot.user}")
- 
+
+    try:
+        synced = await bot.tree.sync()
+        print(f"[Economy Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+    except Exception as e:
+        print(f"[Economy Bot] ❌ Sync failed: {e}")
+
+    # Optionally, also sync to your main server instantly (remove if not needed):
+    # MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
+    # try:
+    #     guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
+    #     print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
+    # except Exception as e:
+    #     print(f"[Economy Bot] Guild sync failed: {e}")
+
     for guild in bot.guilds:
         try:
             await _refresh_stats_channel(guild)
