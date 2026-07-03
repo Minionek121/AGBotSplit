@@ -1694,21 +1694,19 @@ async def on_ready():
     await load_disabled_commands()
     await load_prefix_restrictions()
     bot.add_view(ChestChannelView())
-    ok, fail = 0, 0
+
+    try:
+        synced = await bot.tree.sync()
+        print(f"[Drops Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+    except Exception as e:
+        print(f"[Drops Bot] ❌ Sync failed: {e}")
+
     for guild in bot.guilds:
         try:
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            ok += 1
-        except discord.HTTPException as e:
-            print(f"[Drops Sync] ❌ {guild.name}: {e}")
-            fail += 1
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print(f"[Drops Bot] Synced {ok} ok / {fail} failed. Logged in as {bot.user}")
-    for guild in bot.guilds:
-        try: await _refresh_chest_channel(guild)
-        except Exception as e: print(f"[ChestPanel restore] {guild.name}: {e}")
+            await _refresh_chest_channel(guild)
+        except Exception as e:
+            print(f"[ChestPanel restore] {guild.name}: {e}")
+
     for task_fn in [daily_key_loop, mega_loop, mega_info_loop, power_giveaway_loop]:
         bot.loop.create_task(task_fn())
 
