@@ -772,6 +772,11 @@ async def pfx_removegiveawayrole(ctx, role: discord.Role):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
     await removegiveawayrole._callback(FakeInteraction(ctx), role)
 
+
+# ═══════════════════════════════════════════════════════
+# AUTO-ENTRY SYSTEM
+# ═══════════════════════════════════════════════════════
+
 @bot.tree.command(name="addautoentryrole",
                   description="Add/update a role that allows auto-entry for giveaways")
 @app_commands.describe(role="Role to allow",
@@ -1574,6 +1579,7 @@ async def cmd_stopgames(ctx):
     if task: task.cancel()
     active_game_sessions.pop(gid, None)
     await ctx.send("🛑 Random games stopped.")
+
 
 # ═══════════════════════════════════════════════════════
 # GAME LOOP
