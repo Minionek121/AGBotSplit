@@ -1709,6 +1709,7 @@ async def on_ready():
 
     for task_fn in [daily_key_loop, mega_loop, mega_info_loop, power_giveaway_loop]:
         bot.loop.create_task(task_fn())
+        
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
