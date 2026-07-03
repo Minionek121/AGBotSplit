@@ -461,6 +461,7 @@ async def cmd_disablewelcomechannel(ctx):
             await db.commit()
     await ctx.send("🔒 Welcome channel message disabled.")
 
+
 # ═══════════════════════════════════════════════════════
 # GAMBLING — BLACKJACK + ROULETTE
 # ═══════════════════════════════════════════════════════
@@ -993,6 +994,7 @@ async def redeem(interaction: discord.Interaction, code: str):
 async def pfx_redeem(ctx, code: str):
     await redeem._callback(FakeInteraction(ctx), code)
 
+
 # ═══════════════════════════════════════════════════════
 # ADMIN PANEL
 # ═══════════════════════════════════════════════════════
@@ -1341,6 +1343,7 @@ async def cmd_listprefixchannels(ctx):
         lines.append(f"• {ch_str} | {role_str} → {status}")
     await ctx.send(embed=discord.Embed(title="🔒 Prefix Restrictions", description="\n".join(lines),
                                        color=discord.Color.orange()))
+
 
 # ═══════════════════════════════════════════════════════
 # AUTO-RESET ON LEAVE
