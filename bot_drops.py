@@ -1693,21 +1693,17 @@ async def on_ready():
     await common._load_prefix()
     await load_disabled_commands()
     await load_prefix_restrictions()
-    bot.add_view(ChestChannelView())
+    bot.add_view(VerificationView())
+    bot.add_view(AdminPanelView())
 
     try:
         synced = await bot.tree.sync()
-        print(f"[Drops Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+        print(f"[Admin Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
     except Exception as e:
-        print(f"[Drops Bot] ❌ Sync failed: {e}")
+        print(f"[Admin Bot] ❌ Sync failed: {e}")
 
-    for guild in bot.guilds:
-        try:
-            await _refresh_chest_channel(guild)
-        except Exception as e:
-            print(f"[ChestPanel restore] {guild.name}: {e}")
-
-    for task_fn in [daily_key_loop, mega_loop, mega_info_loop, power_giveaway_loop]:
+    for task_fn in [auto_reset_loop, daily_gamble_loop,
+                    lambda: msg_count_flush_loop(bot)]:
         bot.loop.create_task(task_fn())
         
 
