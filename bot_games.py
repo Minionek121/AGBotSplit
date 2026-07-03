@@ -1770,7 +1770,6 @@ async def on_ready():
     await load_disabled_commands()
     await load_prefix_restrictions()
 
-    # Resume any auto giveaway loops that were running before restart
     async with get_db() as db:
         async with db.execute("SELECT guild_id FROM auto_giveaway_config WHERE running=1") as cur:
             ag_guilds = [r[0] for r in await cur.fetchall()]
@@ -1778,18 +1777,11 @@ async def on_ready():
         auto_giveaway_tasks[gid] = asyncio.create_task(auto_giveaway_loop(gid))
         print(f"[AutoGiveaway] Resumed for guild {gid}")
 
-    ok, fail = 0, 0
-    for guild in bot.guilds:
-        try:
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            ok += 1
-        except discord.HTTPException as e:
-            print(f"[Games Sync] ❌ {guild.name}: {e}")
-            fail += 1
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print(f"[Games Bot] Synced {ok} ok / {fail} failed. Logged in as {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"[Games Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+    except Exception as e:
+        print(f"[Games Bot] ❌ Sync failed: {e}")
 
     for task_fn in [giveaway_watcher, game_loop]:
         bot.loop.create_task(task_fn())
@@ -1802,7 +1794,7 @@ async def on_guild_join(guild: discord.Guild):
         await bot.tree.sync(guild=guild)
     except discord.HTTPException as e:
         print(f"[Games Sync] Failed on join: {e}")
-
+        
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
