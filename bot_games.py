@@ -1783,6 +1783,13 @@ async def on_ready():
     except Exception as e:
         print(f"[Games Bot] ❌ Sync failed: {e}")
 
+    MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
+    try:
+        guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
+        print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
+    except Exception as e:
+        print(f"[Economy Bot] Guild sync failed: {e}")
+
     for task_fn in [giveaway_watcher, game_loop]:
         bot.loop.create_task(task_fn())
 
