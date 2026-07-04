@@ -995,8 +995,7 @@ async def setmegapayout(interaction: discord.Interaction, denominator_mode: str,
     denom_label = "total tickets in the pool" if denominator_mode == "total" else "tickets that were actually bought"
     await interaction.response.send_message(
         f"✅ Mega raffle payout updated:\n"
-        f"`(total tickets ÷ {denom_label}) × {MEGA_TICKET_PRICE:,} × {payout_multiplier} ÷ {final_winners} winner(s)`\n"
-        f"ℹ️ If **{denom_label}** is 0 for a given draw, it's treated as 1 to avoid a division error.")
+        f"`{denom_label} × {MEGA_TICKET_PRICE:,} × {payout_multiplier} ÷ {final_winners} winner(s)`\n")
 
 @bot.command(name="setmegapayout")
 async def pfx_setmegapayout(ctx, denominator_mode: str, payout_multiplier: float, winners: int = None):
@@ -1149,7 +1148,7 @@ async def mega_loop():
             else:
                 denominator = total if total > 0 else 1
 
-            total_payout = (total / denominator) * MEGA_TICKET_PRICE * multiplier
+            total_payout = denominator * MEGA_TICKET_PRICE * multiplier
             per_winner = round(total_payout / winners_count)
 
             winner_ids = _weighted_sample_without_replacement(entries, winners_count)
