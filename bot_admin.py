@@ -2020,20 +2020,17 @@ async def on_ready():
     await load_prefix_restrictions()
     bot.add_view(VerificationView())
     bot.add_view(AdminPanelView())
-
-    ok, fail = 0, 0
-    for guild in bot.guilds:
-        try:
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            ok += 1
-        except discord.HTTPException as e:
-            print(f"[Admin Sync] ❌ {guild.name}: {e}")
-            fail += 1
+ 
     bot.tree.clear_commands(guild=None)
-    await bot.tree.sync(guild=None)
-    print(f"[Admin Bot] Synced {ok} ok / {fail} failed. Logged in as {bot.user}")
-
+    await bot.tree.sync()
+ 
+    guild = discord.Object(id=_GUILD_ID)
+    try:
+        synced = await bot.tree.sync(guild=guild)
+        print(f"[Admin Bot] Synced {len(synced)} commands to guild. Logged in as {bot.user}")
+    except Exception as e:
+        print(f"[Admin Bot] Guild sync failed: {e}")
+ 
     for task_fn in [auto_reset_loop, daily_gamble_loop,
                     lambda: msg_count_flush_loop(bot)]:
         bot.loop.create_task(task_fn())
