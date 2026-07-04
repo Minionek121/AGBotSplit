@@ -1695,12 +1695,6 @@ async def on_ready():
     await load_prefix_restrictions()
     bot.add_view(ChestChannelView())   # only ChestChannelView belongs here
 
-    try:
-        synced = await bot.tree.sync()
-        print(f"[Drops Bot] Synced {len(synced)} slash command(s). Logged in as {bot.user}")
-    except Exception as e:
-        print(f"[Drops Bot] Sync failed: {e}")
-
     for guild in bot.guilds:
         try:
             await _refresh_chest_channel(guild)
