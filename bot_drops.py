@@ -1688,29 +1688,30 @@ async def on_message(message):
     if message.content.startswith(common._BOT_PREFIX) and not _prefix_channel_allowed(message): return
     await bot.process_commands(message)
 
+@bot.event
 async def on_ready():
     await setup_database()
     await common._load_prefix()
     await load_disabled_commands()
     await load_prefix_restrictions()
     bot.add_view(ChestChannelView())
- 
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync()
- 
-    guild = discord.Object(id=_GUILD_ID)
+
+    _guild = discord.Object(id=_GUILD_ID)
+    bot.tree.copy_global_to(guild=_guild)
     try:
-        synced = await bot.tree.sync(guild=guild)
+        synced = await bot.tree.sync(guild=_guild)
         print(f"[Drops Bot] Synced {len(synced)} commands to guild. Logged in as {bot.user}")
     except Exception as e:
         print(f"[Drops Bot] Guild sync failed: {e}")
- 
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync()
+
     for g in bot.guilds:
         try:
             await _refresh_chest_channel(g)
         except Exception as e:
             print(f"[ChestPanel restore] {g.name}: {e}")
- 
+
     for task_fn in [daily_key_loop, mega_loop, mega_info_loop, power_giveaway_loop]:
         bot.loop.create_task(task_fn())
         
