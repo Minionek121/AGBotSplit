@@ -22,7 +22,7 @@ from common import (
 )
  
 TOKEN = os.getenv("TOKEN_ECONOMY")
- 
+_GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 intents = discord.Intents.default()
 intents.members = True
 intents.guilds = True
