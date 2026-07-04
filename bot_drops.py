@@ -1693,24 +1693,21 @@ async def on_ready():
     await common._load_prefix()
     await load_disabled_commands()
     await load_prefix_restrictions()
-    bot.add_view(VerificationView())
-    bot.add_view(AdminPanelView())
+    bot.add_view(ChestChannelView())   # only ChestChannelView belongs here
 
     try:
         synced = await bot.tree.sync()
-        print(f"[Admin Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+        print(f"[Drops Bot] Synced {len(synced)} slash command(s). Logged in as {bot.user}")
     except Exception as e:
-        print(f"[Admin Bot] ❌ Sync failed: {e}")
+        print(f"[Drops Bot] Sync failed: {e}")
 
-    MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
-    try:
-        guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
-        print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
-    except Exception as e:
-        print(f"[Economy Bot] Guild sync failed: {e}")
+    for guild in bot.guilds:
+        try:
+            await _refresh_chest_channel(guild)
+        except Exception as e:
+            print(f"[ChestPanel restore] {guild.name}: {e}")
 
-    for task_fn in [auto_reset_loop, daily_gamble_loop,
-                    lambda: msg_count_flush_loop(bot)]:
+    for task_fn in [daily_key_loop, mega_loop, mega_info_loop, power_giveaway_loop]:
         bot.loop.create_task(task_fn())
         
 
@@ -1743,6 +1740,213 @@ async def _log_prefix_command(ctx: commands.Context):
     embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
     embed.set_footer(text=f"#{getattr(ctx.channel,'name','DM')} | UID: {ctx.author.id}")
     await log_event(ctx.guild.id, "command", embed)
+
+# ── Abuse box management ──────────────────────────────────────────────────────
+@bot.tree.command(name="addbox", description="Admin: create an abuse box")
+@app_commands.describe(name="Box name")
+@command_enabled()
+async def slash_addbox(interaction: discord.Interaction, name: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            try:
+                await db.execute("INSERT INTO abuse_boxes VALUES(?,?)", (interaction.guild.id, name))
+                await db.commit()
+            except aiosqlite.IntegrityError:
+                await interaction.response.send_message(f"❌ Box **{name}** already exists.", ephemeral=True); return
+    await interaction.response.send_message(f"✅ Created box **{name}**.")
+
+@bot.tree.command(name="removebox", description="Admin: delete an abuse box and all its prizes")
+@app_commands.describe(name="Box name")
+@command_enabled()
+async def slash_removebox(interaction: discord.Interaction, name: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT box_name FROM abuse_boxes WHERE guild_id=? AND box_name=?",
+                                  (interaction.guild.id, name)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(f"❌ Box **{name}** not found.", ephemeral=True); return
+            await db.execute("DELETE FROM abuse_boxes WHERE guild_id=? AND box_name=?", (interaction.guild.id, name))
+            await db.execute("DELETE FROM abuse_box_prizes WHERE guild_id=? AND box_name=?", (interaction.guild.id, name))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed box **{name}** and all its prizes.")
+
+@bot.tree.command(name="removeboxprize", description="Admin: remove a prize from an abuse box by ID")
+@app_commands.describe(box="Box name", prize_id="Prize ID from !listboxes")
+@command_enabled()
+async def slash_removeboxprize(interaction: discord.Interaction, box: str, prize_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT id FROM abuse_box_prizes WHERE id=? AND guild_id=? AND box_name=?",
+                                  (prize_id, interaction.guild.id, box)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(
+                        f"❌ Prize #{prize_id} not found in **{box}**.", ephemeral=True); return
+            await db.execute("DELETE FROM abuse_box_prizes WHERE id=?", (prize_id,))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed prize #{prize_id} from **{box}**.")
+
+@bot.tree.command(name="listboxes", description="List all abuse boxes and their prizes")
+@app_commands.describe(box="Specific box to view (leave blank for all)")
+@command_enabled()
+async def slash_listboxes(interaction: discord.Interaction, box: str = None):
+    await interaction.response.defer()
+    async with get_db() as db:
+        query = "SELECT box_name FROM abuse_boxes WHERE guild_id=?" + (" AND box_name=?" if box else "")
+        async with db.execute(query, (interaction.guild.id, box) if box else (interaction.guild.id,)) as cur:
+            boxes = await cur.fetchall()
+    if not boxes:
+        await interaction.followup.send("❌ No boxes found."); return
+    embed = discord.Embed(title="📦 Admin Abuse Boxes", color=discord.Color.orange())
+    for (box_name,) in boxes:
+        async with get_db() as db:
+            async with db.execute("SELECT id,prize_type,prize_value,chance FROM abuse_box_prizes "
+                                  "WHERE guild_id=? AND box_name=? ORDER BY id",
+                                  (interaction.guild.id, box_name)) as cur:
+                prizes = await cur.fetchall()
+        if not prizes:
+            embed.add_field(name=f"📦 {box_name}", value="*No prizes yet*", inline=False); continue
+        total_w = sum(p[3] for p in prizes)
+        lines = []
+        for p_id, p_type, p_value, p_chance in prizes:
+            pct = (p_chance / total_w * 100) if total_w > 0 else 0
+            desc = (f"💰 {int(p_value):,}" if p_type == "balance" else
+                    f"⭐ {int(p_value):,} EXP" if p_type == "exp" else
+                    f"🎒 {p_value}" if p_type == "item" else f"✨ {p_value}")
+            lines.append(f"`#{p_id}` {desc} — **{pct:.1f}%**")
+        embed.add_field(name=f"📦 {box_name}", value="\n".join(lines), inline=False)
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="givebox", description="Admin: give a box to all members with a role")
+@app_commands.describe(role="Role to give boxes to", amount="How many boxes per member", box="Box name")
+@command_enabled()
+async def slash_givebox(interaction: discord.Interaction, role: discord.Role, amount: int, box: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    async with get_db() as db:
+        async with db.execute("SELECT box_name FROM abuse_boxes WHERE guild_id=? AND box_name=?",
+                              (interaction.guild.id, box)) as cur:
+            if not await cur.fetchone():
+                await interaction.response.send_message(f"❌ Box **{box}** not found.", ephemeral=True); return
+    await interaction.response.defer()
+    members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
+    if not members:
+        await interaction.followup.send(f"❌ No non-bot members with {role.mention}."); return
+    for m in members:
+        await inventory_add(interaction.guild.id, m.id, box, amount)
+    await interaction.followup.send(
+        f"✅ Gave **{amount}x {box}** to **{len(members)}** member(s) with {role.mention}.")
+
+@bot.tree.command(name="addrarebox", description="Admin: mark a box prize as a rare drop")
+@app_commands.describe(box="Box name", prize_id="Prize ID from /listboxes")
+@command_enabled()
+async def slash_addrarebox(interaction: discord.Interaction, box: str, prize_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with get_db() as db:
+        async with db.execute("SELECT prize_type,prize_value FROM abuse_box_prizes "
+                              "WHERE id=? AND guild_id=? AND box_name=?",
+                              (prize_id, interaction.guild.id, box)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        await interaction.response.send_message(
+            f"❌ Prize #{prize_id} not found in **{box}**.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            try:
+                await db.execute("INSERT INTO rare_box_config(guild_id,box_name,prize_id) VALUES(?,?,?)",
+                                 (interaction.guild.id, box, prize_id))
+                await db.commit()
+            except aiosqlite.IntegrityError:
+                await interaction.response.send_message(
+                    f"❌ Prize #{prize_id} already marked as rare.", ephemeral=True); return
+    await interaction.response.send_message(
+        f"✅ Prize `#{prize_id}` ({row[0]}: **{row[1]}**) in **{box}** is now a rare drop.")
+
+@bot.tree.command(name="removerarebox", description="Admin: unmark a box prize as a rare drop")
+@app_commands.describe(box="Box name", prize_id="Prize ID")
+@command_enabled()
+async def slash_removerarebox(interaction: discord.Interaction, box: str, prize_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("DELETE FROM rare_box_config WHERE guild_id=? AND box_name=? AND prize_id=?",
+                             (interaction.guild.id, box, prize_id))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Prize #{prize_id} in **{box}** is no longer a rare drop.")
+
+# ── Ticket admin ──────────────────────────────────────────────────────────────
+@bot.tree.command(name="addtickets", description="Admin: give mega tickets to a user")
+@app_commands.describe(user="Target user", amount="Tickets to add")
+@command_enabled()
+async def slash_addtickets(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await add_tickets(interaction.guild.id, user.id, amount)
+    await interaction.response.send_message(f"✅ Added {amount} mega tickets to {user.mention}.")
+
+@bot.tree.command(name="removetickets", description="Admin: remove mega tickets from a user")
+@app_commands.describe(user="Target user", amount="Tickets to remove")
+@command_enabled()
+async def slash_removetickets(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await add_tickets(interaction.guild.id, user.id, -amount)
+    await interaction.response.send_message(f"❌ Removed {amount} mega tickets from {user.mention}.")
+
+# ── VIP key admin ─────────────────────────────────────────────────────────────
+@bot.tree.command(name="givekey", description="Admin: give VIP Chest Keys to a user")
+@app_commands.describe(user="Target user", amount="Keys to give (default 1)")
+@command_enabled()
+async def slash_givekey(interaction: discord.Interaction, user: discord.Member, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    await inventory_add(interaction.guild.id, user.id, VIP_CHEST_KEY, amount)
+    await interaction.response.send_message(f"🔑 Gave **{amount}x {VIP_CHEST_KEY}** to {user.mention}.")
+    await log_event(interaction.guild.id, "item", _log_embed("🔑 VIP Key Given", discord.Color.green(),
+        Admin=interaction.user.mention, User=user.mention, Keys=str(amount)))
+
+@bot.tree.command(name="takekey", description="Admin: take VIP Chest Keys from a user")
+@app_commands.describe(user="Target user", amount="Keys to take (default 1)")
+@command_enabled()
+async def slash_takekey(interaction: discord.Interaction, user: discord.Member, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    if not await inventory_remove(interaction.guild.id, user.id, VIP_CHEST_KEY, amount):
+        await interaction.response.send_message(
+            f"❌ {user.mention} doesn't have {amount}x {VIP_CHEST_KEY}.", ephemeral=True); return
+    await interaction.response.send_message(f"🗑 Took **{amount}x {VIP_CHEST_KEY}** from {user.mention}.")
+    await log_event(interaction.guild.id, "item", _log_embed("🔑 VIP Key Taken", discord.Color.red(),
+        Admin=interaction.user.mention, User=user.mention, Keys=str(amount)))
+
+@bot.tree.command(name="givekeyrole", description="Admin: give VIP Chest Keys to all members with a role")
+@app_commands.describe(role="Target role", amount="Keys per member (default 1)")
+@command_enabled()
+async def slash_givekeyrole(interaction: discord.Interaction, role: discord.Role, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    await interaction.response.defer()
+    members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
+    if not members:
+        await interaction.followup.send(f"❌ No non-bot members with {role.mention}."); return
+    for m in members:
+        await inventory_add(interaction.guild.id, m.id, VIP_CHEST_KEY, amount)
+    await interaction.followup.send(
+        f"🔑 Gave **{amount}x {VIP_CHEST_KEY}** to **{len(members)}** member(s) with {role.mention}.")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
