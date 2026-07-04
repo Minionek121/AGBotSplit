@@ -1443,21 +1443,24 @@ async def auto_reset_loop():
 # ═══════════════════════════════════════════════════════
 
 async def _calc_exp_gain(member: discord.Member, channel: discord.TextChannel) -> int:
-    base = 1
+    """Base EXP is a random 30-50 per message. Boosts multiply on top of that."""
+    base = random.randint(30, 50)
     gid = member.guild.id
     async with get_db() as db:
         async with db.execute(
-            "SELECT role_id,boost_percent,channel_id,category_id FROM exp_boosts WHERE guild_id=?", (gid,)) as cur:
+            "SELECT role_id,boost_percent,channel_id,category_id FROM exp_boosts WHERE guild_id=?",
+            (gid,)) as cur:
             boosts = await cur.fetchall()
-    role_ids   = {r.id for r in member.roles}
-    cat_id     = getattr(channel, "category_id", None)
+    role_ids    = {r.id for r in member.roles}
+    cat_id      = getattr(channel, "category_id", None)
     total_boost = 0.0
     for role_id, boost_pct, ch_id, cat_id_rule in boosts:
         if role_id not in role_ids: continue
         if ch_id and ch_id != channel.id: continue
         if cat_id_rule and cat_id_rule != cat_id: continue
         total_boost += boost_pct
-    return max(1, int(base + (base * total_boost / 100)))
+    return max(1, int(base * (1 + total_boost / 100)))
+
 
 # ═══════════════════════════════════════════════════════
 # RESET COMMANDS
