@@ -2033,13 +2033,6 @@ async def on_ready():
     await bot.tree.sync(guild=None)
     print(f"[Admin Bot] Synced {ok} ok / {fail} failed. Logged in as {bot.user}")
 
-    MAIN_GUILD_ID = 1517921719690723348  # ← replace with your server ID
-    try:
-        guild_synced = await bot.tree.sync(guild=discord.Object(id=MAIN_GUILD_ID))
-        print(f"[Economy Bot] ✅ Instant guild sync: {len(guild_synced)} commands")
-    except Exception as e:
-        print(f"[Economy Bot] Guild sync failed: {e}")
-
     for task_fn in [auto_reset_loop, daily_gamble_loop,
                     lambda: msg_count_flush_loop(bot)]:
         bot.loop.create_task(task_fn())
