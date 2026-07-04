@@ -484,10 +484,9 @@ async def get_balance(guild_id: int, user_id: int) -> int:
             return row[0]
  
  
-async def add_balance(guild_id: int, user_id: int, amount: int, bot: commands.Bot = None):
-    """`bot` is optional — pass the calling bot instance so balance-rank role
-    updates can actually look up the guild/member. If omitted, rank checks
-    are skipped (used rarely, e.g. from contexts with no bot reference)."""
+async def add_balance(guild_id: int, user_id: int, amount: int, bot=None):
+    """`bot` is optional. If omitted, we auto-find any registered bot
+    that's in this guild — so balance rank updates work from every caller."""
     async with db_lock:
         async with get_db() as db:
             await db.execute(
@@ -499,8 +498,17 @@ async def add_balance(guild_id: int, user_id: int, amount: int, bot: commands.Bo
                 "UPDATE balances SET balance=0 WHERE guild_id=? AND user_id=? AND balance<0",
                 (guild_id, user_id))
             await db.commit()
-    if bot is not None:
-        await _update_balance_rank(bot, guild_id, user_id)
+ 
+    # Use the provided bot, or find any registered bot that can see this guild
+    _bot = bot
+    if _bot is None:
+        for b in _bot_instances:
+            if b.get_guild(guild_id):
+                _bot = b
+                break
+ 
+    if _bot is not None:
+        await _update_balance_rank(_bot, guild_id, user_id)
  
  
 async def _update_balance_rank(bot: commands.Bot, guild_id: int, user_id: int):
