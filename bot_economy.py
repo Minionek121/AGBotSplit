@@ -1266,7 +1266,169 @@ async def _log_prefix_command(ctx: commands.Context):
     embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
     embed.set_footer(text=f"#{getattr(ctx.channel, 'name', 'DM')} | UID: {ctx.author.id}")
     await log_event(ctx.guild.id, "command", embed)
- 
+
+# ── gift ─────────────────────────────────────────────────────────────────────
+@bot.tree.command(name="gift", description="Give your own coins to another user")
+@app_commands.describe(user="Who to gift to", amount="How many coins")
+@command_enabled()
+async def slash_gift(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("❌ You cannot gift yourself.", ephemeral=True); return
+    gid = interaction.guild.id
+    bal = await get_balance(gid, interaction.user.id)
+    if bal < amount:
+        await interaction.response.send_message("❌ Not enough balance.", ephemeral=True); return
+    await add_balance(gid, interaction.user.id, -amount, bot=bot)
+    await add_balance(gid, user.id, amount, bot=bot)
+    await add_stat(gid, interaction.user.id, "gifted_balance", amount)
+    await interaction.response.send_message(f"💸 You gifted **{amount:,}** coins to {user.mention}!")
+    await log_event(gid, "balance", _log_embed("🎁 Gift Sent", discord.Color.green(),
+        From=interaction.user.mention, To=user.mention, Amount=f"{amount:,}"))
+
+# ── addbalance / removebalance ───────────────────────────────────────────────
+@bot.tree.command(name="addbalance", description="Admin: add coins to a user")
+@app_commands.describe(user="Target user", amount="Amount to add")
+@command_enabled()
+async def slash_addbalance(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await add_balance(interaction.guild.id, user.id, amount, bot=bot)
+    await interaction.response.send_message(f"✅ Added {amount:,} coins to {user.mention}.")
+    await log_event(interaction.guild.id, "balance", _log_embed("💰 Balance Added", discord.Color.green(),
+        Admin=interaction.user.mention, User=user.mention, Amount=f"+{amount:,}"))
+    await log_event(interaction.guild.id, "admin", _log_embed("⚙️ addbalance", discord.Color.orange(),
+        By=interaction.user.mention, User=user.mention, Amount=f"+{amount:,}"))
+
+@bot.tree.command(name="removebalance", description="Admin: remove coins from a user")
+@app_commands.describe(user="Target user", amount="Amount to remove")
+@command_enabled()
+async def slash_removebalance(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await add_balance(interaction.guild.id, user.id, -amount, bot=bot)
+    await interaction.response.send_message(f"❌ Removed {amount:,} coins from {user.mention}.")
+    await log_event(interaction.guild.id, "balance", _log_embed("💸 Balance Removed", discord.Color.red(),
+        Admin=interaction.user.mention, User=user.mention, Amount=f"-{amount:,}"))
+
+# ── EXP admin ────────────────────────────────────────────────────────────────
+@bot.tree.command(name="addexp", description="Admin: add usable EXP to a user")
+@app_commands.describe(user="Target user", amount="EXP to add")
+@command_enabled()
+async def slash_addexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+    await add_exp(interaction.guild.id, user.id, amount, is_bonus=True)
+    await interaction.response.send_message(f"✅ Added **{amount:,}** usable EXP to {user.mention}.")
+
+@bot.tree.command(name="removeexp", description="Admin: remove usable EXP from a user")
+@app_commands.describe(user="Target user", amount="EXP to remove")
+@command_enabled()
+async def slash_removeexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await add_exp(interaction.guild.id, user.id, -amount)
+    await interaction.response.send_message(f"❌ Removed {amount:,} EXP from {user.mention}.")
+
+@bot.tree.command(name="addtotalexp", description="Admin: add Total EXP (Activity Rank only, usable unchanged)")
+@app_commands.describe(user="Target user", amount="EXP to add to rank")
+@command_enabled()
+async def slash_addtotalexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+    now = int(datetime.now(UTC).timestamp())
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT INTO exp_history(guild_id,user_id,amount,timestamp,is_bonus) VALUES(?,?,?,?,?)",
+                             (interaction.guild.id, user.id, amount, now, 0))
+            await db.execute("INSERT INTO exp_history(guild_id,user_id,amount,timestamp,is_bonus) VALUES(?,?,?,?,?)",
+                             (interaction.guild.id, user.id, -amount, now, 0))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Added **{amount:,}** to {user.mention}'s Total EXP (7d). Usable EXP unchanged.")
+
+@bot.tree.command(name="removetotalexp", description="Admin: remove Total EXP (Activity Rank only)")
+@app_commands.describe(user="Target user", amount="EXP to remove from rank")
+@command_enabled()
+async def slash_removetotalexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await interaction.response.defer()
+    ctx_like = FakeInteraction(None)  # use the prefix logic by calling cmd directly
+    # Inline the logic rather than calling the prefix command
+    if amount <= 0:
+        await interaction.followup.send("❌ Amount must be > 0."); return
+    week_ago = int((datetime.now(UTC) - timedelta(days=7)).timestamp())
+    remaining = amount; actually_removed = 0
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT rowid, amount FROM exp_history "
+                "WHERE guild_id=? AND user_id=? AND timestamp>=? AND amount>0 AND is_bonus=0 "
+                "ORDER BY timestamp ASC", (interaction.guild.id, user.id, week_ago)) as cur:
+                entries = await cur.fetchall()
+            for rowid, entry_amount in entries:
+                if remaining <= 0: break
+                if entry_amount <= remaining:
+                    await db.execute("DELETE FROM exp_history WHERE rowid=?", (rowid,))
+                    remaining -= entry_amount
+                else:
+                    await db.execute("UPDATE exp_history SET amount=? WHERE rowid=?",
+                                     (entry_amount - remaining, rowid)); remaining = 0
+            actually_removed = amount - remaining
+            if actually_removed > 0:
+                await db.execute("INSERT INTO exp_history(guild_id,user_id,amount,timestamp,is_bonus) VALUES(?,?,?,?,?)",
+                                 (interaction.guild.id, user.id, actually_removed, int(datetime.now(UTC).timestamp()), 1))
+            await db.commit()
+    if actually_removed == 0:
+        await interaction.followup.send(f"❌ {user.mention} has no Total EXP (7d) to remove.")
+    else:
+        await interaction.followup.send(
+            f"✅ Removed **{actually_removed:,}** from {user.mention}'s Total EXP (7d). Usable EXP unchanged.")
+
+# ── leaderboard stat admin ───────────────────────────────────────────────────
+@bot.tree.command(name="addleaderboardstat", description="Admin: manually add to a user's leaderboard stat")
+@app_commands.describe(user="Target user", stat="Which stat to add to", amount="Amount to add")
+@app_commands.choices(stat=[app_commands.Choice(name=s.replace("_"," ").title(), value=s) for s in
+                             ("total_exp","gifted_balance","chests_opened","mega_tickets_bought","hosted_balance")])
+@command_enabled()
+async def slash_addleaderboardstat(interaction: discord.Interaction, user: discord.Member,
+                                   stat: str, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+    await ensure_stats(interaction.guild.id, user.id)
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(f"UPDATE user_stats SET {stat}={stat}+? WHERE guild_id=? AND user_id=?",
+                             (amount, interaction.guild.id, user.id))
+            await db.commit()
+    await interaction.response.send_message(f"✅ Added **{amount:,}** to {user.mention}'s **{stat}**.")
+
+@bot.tree.command(name="removeleaderboardstat", description="Admin: remove from a user's leaderboard stat")
+@app_commands.describe(user="Target user", stat="Which stat to remove from", amount="Amount to remove")
+@app_commands.choices(stat=[app_commands.Choice(name=s.replace("_"," ").title(), value=s) for s in
+                             ("total_exp","gifted_balance","chests_opened","mega_tickets_bought","hosted_balance")])
+@command_enabled()
+async def slash_removeleaderboardstat(interaction: discord.Interaction, user: discord.Member,
+                                      stat: str, amount: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+    await ensure_stats(interaction.guild.id, user.id)
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(f"UPDATE user_stats SET {stat}=MAX(0,{stat}-?) WHERE guild_id=? AND user_id=?",
+                             (amount, interaction.guild.id, user.id))
+            await db.commit()
+    await interaction.response.send_message(f"❌ Removed **{amount:,}** from {user.mention}'s **{stat}**.")
  
 if __name__ == "__main__":
     bot.run(TOKEN)
