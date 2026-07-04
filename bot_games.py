@@ -1778,15 +1778,18 @@ async def on_ready():
         auto_giveaway_tasks[gid] = asyncio.create_task(auto_giveaway_loop(gid))
         print(f"[AutoGiveaway] Resumed for guild {gid}")
 
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync()
+
+    guild = discord.Object(id=_GUILD_ID)
     try:
-        synced = await bot.tree.sync()
-        print(f"[Games Bot] ✅ Synced {len(synced)} global slash command(s). Logged in as {bot.user}")
+        synced = await bot.tree.sync(guild=guild)
+        print(f"[Games Bot] Synced {len(synced)} commands to guild. Logged in as {bot.user}")
     except Exception as e:
-        print(f"[Games Bot] ❌ Sync failed: {e}")
+        print(f"[Games Bot] Guild sync failed: {e}")
 
     for task_fn in [giveaway_watcher, game_loop]:
         bot.loop.create_task(task_fn())
-
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
