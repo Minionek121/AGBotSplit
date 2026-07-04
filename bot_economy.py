@@ -1210,19 +1210,17 @@ async def on_ready():
     await load_disabled_commands()
     await load_prefix_restrictions()
     bot.add_view(StatsChannelView())
- 
-    # Clear any previously registered global commands
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync()
- 
-    # Guild sync — appears instantly
-    guild = discord.Object(id=_GUILD_ID)
+
+    _guild = discord.Object(id=_GUILD_ID)
+    bot.tree.copy_global_to(guild=_guild)
     try:
-        synced = await bot.tree.sync(guild=guild)
+        synced = await bot.tree.sync(guild=_guild)
         print(f"[Economy Bot] Synced {len(synced)} commands to guild. Logged in as {bot.user}")
     except Exception as e:
         print(f"[Economy Bot] Guild sync failed: {e}")
- 
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync()   # clears any old global commands from Discord
+
     for g in bot.guilds:
         try:
             await _refresh_stats_channel(g)
