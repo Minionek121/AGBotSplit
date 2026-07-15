@@ -1443,7 +1443,6 @@ async def auto_reset_loop():
 # ═══════════════════════════════════════════════════════
 
 async def _calc_exp_gain(member: discord.Member, channel: discord.TextChannel) -> int:
-    """Base EXP is a random 30-50 per message. Boosts multiply on top of that."""
     base = random.randint(30, 50)
     gid = member.guild.id
     async with get_db() as db:
@@ -1459,7 +1458,8 @@ async def _calc_exp_gain(member: discord.Member, channel: discord.TextChannel) -
         if ch_id and ch_id != channel.id: continue
         if cat_id_rule and cat_id_rule != cat_id: continue
         total_boost += boost_pct
-    return max(1, int(base * (1 + total_boost / 100)))
+    result = int(base * (1 + min(total_boost, 900) / 100)) 
+    return max(1, min(result, 500)) 
 
 
 # ═══════════════════════════════════════════════════════
