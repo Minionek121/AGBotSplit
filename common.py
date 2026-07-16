@@ -268,7 +268,7 @@ async def setup_database():
  
 VIP_CHEST_KEY        = "VIP Chest Key"
 GAMBLE_TOKEN         = "Gamble Token"
-MEGA_TICKET_PRICE    = 400000
+MEGA_TICKET_PRICE    = 40000
 MEGA_TICKET_CAP      = 250
 CHEST_COST           = 1000
 LEVEL_DIVISOR        = 700
