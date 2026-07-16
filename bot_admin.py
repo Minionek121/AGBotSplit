@@ -1458,8 +1458,8 @@ async def _calc_exp_gain(member: discord.Member, channel: discord.TextChannel) -
         if ch_id and ch_id != channel.id: continue
         if cat_id_rule and cat_id_rule != cat_id: continue
         total_boost += boost_pct
-    result = int(base * (1 + min(total_boost, 900) / 100)) 
-    return max(1, min(result, 500)) 
+    result = int(base * (1 + min(total_boost, 100) / 100)) 
+    return max(1, min(result, 100)) 
 
 
 # ═══════════════════════════════════════════════════════
