@@ -108,6 +108,19 @@ async def _send_giveaway_game_notify(guild_id: int, prize_text: str, channel, ex
     try: await notify_ch.send("\n".join(lines))
     except Exception as e: print(f"[NotifyChannel] {e}")
 
+# =======================================================
+# GAME HELPER
+# =======================================================
+
+    def _parse_game_name_and_rest(args: str) -> tuple[str, str]:
+        args = args.strip()
+        if args.startswith('"'):
+            end = args.find('"', 1)
+            if end != -1:
+                return args[1:end], args[end+1:].strip()
+        parts = args.split(None, 1)
+        return parts[0], (parts[1] if len(parts) > 1 else "")
+
 # ═══════════════════════════════════════════════════════
 # CREATE GIVEAWAY
 # ═══════════════════════════════════════════════════════
@@ -523,49 +536,6 @@ async def pfx_addautogiveaway(ctx, prize: str, winners: int = 1, chance: float =
     await addautogiveaway._callback(FakeInteraction(ctx), prize, winners, chance, reward_balance, reward_exp,
                                     0, 0, 0, None, None, 1)
 
-@bot.command(name="removeautogiveaway")
-async def cmd_removeautogiveaway(ctx, entry_id: int):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT prize FROM auto_giveaway_pool WHERE id=? AND guild_id=?",
-                                  (entry_id, ctx.guild.id)) as cur:
-                row = await cur.fetchone()
-            if not row: await ctx.send(f"❌ No auto giveaway with ID `#{entry_id}`."); return
-            await db.execute("DELETE FROM auto_giveaway_pool WHERE id=?", (entry_id,))
-            await db.commit()
-    await ctx.send(f"🗑 Removed **{row[0]}** (`#{entry_id}`) from the auto pool.")
-
-@bot.command(name="listautogiveaways")
-async def cmd_listautogiveaways(ctx):
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT id,prize,winners,chance,reward_balance,reward_exp,reward_tickets,"
-            "reward_gamble_tokens,reward_vip_keys,reward_role_id,reward_item,reward_item_qty "
-            "FROM auto_giveaway_pool WHERE guild_id=? ORDER BY id", (ctx.guild.id,)) as cur:
-            rows = await cur.fetchall()
-    if not rows: await ctx.send("❌ Auto giveaway pool is empty."); return
-    total_weight = sum(r[3] for r in rows)
-    embed = discord.Embed(title="🎉 Auto Giveaway Pool", color=discord.Color.gold())
-    for (row_id, prize, winners, chance, rb, re, rt, rgt, rvk, rrole, ri, riq) in rows:
-        pct = (chance / total_weight * 100) if total_weight > 0 else 0
-        parts = []
-        if rb:  parts.append(f"💰{rb:,}")
-        if re:  parts.append(f"⭐{re:,}")
-        if rt:  parts.append(f"🎟{rt}")
-        if rgt: parts.append(f"🎲{rgt}")
-        if rvk: parts.append(f"🔑{rvk}")
-        if rrole:
-            role = ctx.guild.get_role(rrole)
-            if role: parts.append(f"👑{role.name}")
-        if ri:  parts.append(f"🎒{riq}x {ri}")
-        embed.add_field(name=f"`#{row_id}` {prize}",
-                        value=f"Winners: {winners} | **{pct:.1f}%** (w:{chance})\n{' + '.join(parts) or 'None'}",
-                        inline=False)
-    embed.set_footer(text=f"{len(rows)} item(s) | total weight: {total_weight}")
-    await ctx.send(embed=embed)
-
-
 @bot.tree.command(name="startgiveaways", description="Start automatic giveaways")
 @app_commands.describe(interval_seconds="Seconds between giveaways",
                        giveaway_duration_seconds="How long each lasts",
@@ -599,18 +569,6 @@ async def pfx_startgiveaways(ctx, interval_seconds: int, giveaway_duration_secon
                                channel: discord.TextChannel = None):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
     await startgiveaways._callback(FakeInteraction(ctx), interval_seconds, giveaway_duration_seconds, channel)
-
-@bot.command(name="stopgiveaways")
-async def cmd_stopgiveaways(ctx):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    gid = ctx.guild.id
-    task = auto_giveaway_tasks.pop(gid, None)
-    if task: task.cancel()
-    async with db_lock:
-        async with get_db() as db:
-            await db.execute("UPDATE auto_giveaway_config SET running=0 WHERE guild_id=?", (gid,))
-            await db.commit()
-    await ctx.send("🛑 Automatic giveaways stopped.")
 
 # ═══════════════════════════════════════════════════════
 # MY WINNINGS
@@ -753,15 +711,6 @@ async def removegiveawayrole(interaction: discord.Interaction, role: discord.Rol
                              (interaction.guild.id, role.id))
             await db.commit()
     await interaction.response.send_message(f"🗑 Removed giveaway permissions from {role.mention}")
-
-@bot.command(name="giveawayroles")
-async def cmd_giveawayroles(ctx):
-    async with get_db() as db:
-        async with db.execute("SELECT role_id FROM giveaway_roles WHERE guild_id=?", (ctx.guild.id,)) as cur:
-            rows = await cur.fetchall()
-    if not rows: await ctx.send("❌ No giveaway roles configured."); return
-    mentions = [r.mention for row in rows if (r := ctx.guild.get_role(row[0]))]
-    await ctx.send("🎉 Giveaway Roles:\n" + ("\n".join(mentions) if mentions else "None found."))
 
 @bot.command(name="addgiveawayrole")
 async def pfx_addgiveawayrole(ctx, role: discord.Role):
@@ -1242,6 +1191,520 @@ _PRESET_CHOICES = [
 # GAME COMMANDS
 # ═══════════════════════════════════════════════════════
 
+# ── reroll ────────────────────────────────────────────────────────────────────
+@bot.tree.command(name="reroll", description="Reroll a giveaway winner")
+@app_commands.describe(message_id="Message ID of the giveaway to reroll")
+@command_enabled()
+async def slash_reroll(interaction: discord.Interaction, message_id: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    try: mid = int(message_id)
+    except ValueError:
+        await interaction.response.send_message("❌ Invalid message ID.", ephemeral=True); return
+    await interaction.response.defer()
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM giveaways WHERE message_id=?", (mid,)) as cur:
+            data = await cur.fetchone()
+    if not data:
+        await interaction.followup.send("❌ Giveaway not found."); return
+    (_mid, channel_id, prize_raw, winner_count, legacy_reward,
+     end_time, required_role, template, ended) = data
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        await interaction.followup.send("❌ Channel not found."); return
+    try: message = await channel.fetch_message(mid)
+    except discord.NotFound:
+        await interaction.followup.send("❌ Message not found."); return
+    reaction = discord.utils.get(message.reactions, emoji="🎉")
+    if not reaction:
+        await interaction.followup.send("❌ Reaction not found."); return
+    try:
+        meta = json.loads(prize_raw)
+        if not isinstance(meta, dict): raise TypeError
+        prize_label = meta.get("label", prize_raw)
+    except Exception:
+        meta = {"label": str(prize_raw), "balance": legacy_reward}
+        prize_label = str(prize_raw)
+    users = await _get_eligible_giveaway_participants(channel, reaction, required_role, meta)
+    if not users:
+        await interaction.followup.send("❌ No participants."); return
+    weighted = []
+    for user in users:
+        lvl = await get_level(interaction.guild.id, user.id)
+        weighted.extend([user] * random.randint(1, max(1, lvl // 4)))
+    new_winner = random.choice(weighted)
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO giveaway_winners VALUES(?,?,?)",
+                             (mid, new_winner.id, int(meta.get("balance", 0))))
+            await db.commit()
+    await distribute_prizes(channel.guild, [new_winner], meta)
+    embed = discord.Embed(title="🔄 Giveaway Rerolled", color=discord.Color.orange(),
+        description=f"**Prize:** {prize_label}\n**Reward:** {build_reward_summary(meta, channel.guild)}\n**New Winner:** {new_winner.mention}")
+    await channel.send(embed=embed)
+    await interaction.followup.send("✅ Giveaway rerolled.")
+
+# ── giveaway roles ────────────────────────────────────────────────────────────
+@bot.tree.command(name="giveawayroles", description="List roles that can manage giveaways")
+@command_enabled()
+async def slash_giveawayroles(interaction: discord.Interaction):
+    async with get_db() as db:
+        async with db.execute("SELECT role_id FROM giveaway_roles WHERE guild_id=?",
+                              (interaction.guild.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await interaction.response.send_message("❌ No giveaway roles configured.", ephemeral=True); return
+    mentions = [r.mention for row in rows if (r := interaction.guild.get_role(row[0]))]
+    embed = discord.Embed(title="🎉 Giveaway Roles",
+                          description="\n".join(mentions) if mentions else "*(all deleted)*",
+                          color=discord.Color.gold())
+    await interaction.response.send_message(embed=embed)
+
+# ── auto giveaway management ──────────────────────────────────────────────────
+@bot.tree.command(name="removeautogiveaway", description="Remove an entry from the auto giveaway pool")
+@app_commands.describe(entry_id="ID shown in /listautogiveaways")
+@command_enabled()
+async def slash_removeautogiveaway(interaction: discord.Interaction, entry_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT prize FROM auto_giveaway_pool WHERE id=? AND guild_id=?",
+                                  (entry_id, interaction.guild.id)) as cur:
+                row = await cur.fetchone()
+            if not row:
+                await interaction.response.send_message(f"❌ No auto giveaway with ID `#{entry_id}`.", ephemeral=True); return
+            await db.execute("DELETE FROM auto_giveaway_pool WHERE id=?", (entry_id,))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed **{row[0]}** (`#{entry_id}`) from the auto pool.")
+
+@bot.tree.command(name="listautogiveaways", description="List all entries in the auto giveaway pool")
+@command_enabled()
+async def slash_listautogiveaways(interaction: discord.Interaction):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id,prize,winners,chance,reward_balance,reward_exp FROM auto_giveaway_pool "
+            "WHERE guild_id=? ORDER BY id", (interaction.guild.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await interaction.response.send_message("❌ Auto giveaway pool is empty.", ephemeral=True); return
+    total_weight = sum(r[3] for r in rows)
+    embed = discord.Embed(title="🎉 Auto Giveaway Pool", color=discord.Color.gold())
+    for row_id, prize, winners, chance, rb, re in rows:
+        pct = (chance / total_weight * 100) if total_weight > 0 else 0
+        parts = []
+        if rb: parts.append(f"💰{rb:,}")
+        if re: parts.append(f"⭐{re:,}")
+        embed.add_field(name=f"`#{row_id}` {prize}",
+                        value=f"Winners: {winners} | **{pct:.1f}%** | {' + '.join(parts) or 'No reward'}",
+                        inline=False)
+    embed.set_footer(text=f"{len(rows)} item(s) | total weight: {total_weight}")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="stopgiveaways", description="Stop automatic giveaways")
+@command_enabled()
+async def slash_stopgiveaways(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    gid = interaction.guild.id
+    task = auto_giveaway_tasks.pop(gid, None)
+    if task: task.cancel()
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("UPDATE auto_giveaway_config SET running=0 WHERE guild_id=?", (gid,))
+            await db.commit()
+    await interaction.response.send_message("🛑 Automatic giveaways stopped.")
+
+# ── game management ───────────────────────────────────────────────────────────
+@bot.tree.command(name="removegame", description="Remove a game and all its answers/hints")
+@app_commands.describe(name="Game name")
+@command_enabled()
+async def slash_removegame(interaction: discord.Interaction, name: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
+                                  (interaction.guild.id, name)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(f"❌ Game **{name}** not found.", ephemeral=True); return
+            await db.execute("DELETE FROM games WHERE guild_id=? AND game_name=?", (interaction.guild.id, name))
+            await db.execute("DELETE FROM game_answers WHERE guild_id=? AND game_name=?", (interaction.guild.id, name))
+            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=?", (interaction.guild.id, name))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed game **{name}** and all its answers and hints.")
+
+@bot.tree.command(name="enablegame", description="Enable a game")
+@app_commands.describe(name="Game name")
+@command_enabled()
+async def slash_enablegame(interaction: discord.Interaction, name: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
+                                  (interaction.guild.id, name)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(f"❌ Game **{name}** not found.", ephemeral=True); return
+            await db.execute("UPDATE games SET enabled=1 WHERE guild_id=? AND game_name=?",
+                             (interaction.guild.id, name))
+            await db.commit()
+    await interaction.response.send_message(f"✅ Game **{name}** enabled.")
+
+@bot.tree.command(name="disablegame", description="Disable a game without deleting it")
+@app_commands.describe(name="Game name")
+@command_enabled()
+async def slash_disablegame(interaction: discord.Interaction, name: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
+                                  (interaction.guild.id, name)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(f"❌ Game **{name}** not found.", ephemeral=True); return
+            await db.execute("UPDATE games SET enabled=0 WHERE guild_id=? AND game_name=?",
+                             (interaction.guild.id, name))
+            await db.commit()
+    await interaction.response.send_message(f"🔒 Game **{name}** disabled.")
+
+@bot.tree.command(name="editgame", description="Edit a game's rewards, chance, or answer time")
+@app_commands.describe(
+    name="Game name", reward_balance="New coin reward (blank = keep current)",
+    reward_exp="New EXP reward", reward_tickets="New ticket reward",
+    reward_gamble_tokens="New gamble token reward", reward_vip_keys="New VIP key reward",
+    reward_item="New item reward", reward_item_qty="New item quantity",
+    reward_role="New role reward", chance="New selection weight",
+    answer_time="New answer time in seconds")
+@command_enabled()
+async def slash_editgame(interaction: discord.Interaction, name: str,
+    reward_balance: int = None, reward_exp: int = None, reward_tickets: int = None,
+    reward_gamble_tokens: int = None, reward_vip_keys: int = None,
+    reward_item: str = None, reward_item_qty: int = None,
+    reward_role: discord.Role = None, chance: float = None, answer_time: int = None):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT reward_balance,reward_exp,reward_tickets,reward_gamble_tokens,reward_vip_keys,"
+            "reward_item,reward_item_qty,reward_role_id,chance,answer_time FROM games "
+            "WHERE guild_id=? AND game_name=?", (interaction.guild.id, name)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        await interaction.response.send_message(f"❌ Game **{name}** not found.", ephemeral=True); return
+    (cur_rb, cur_re, cur_rt, cur_rgt, cur_rvk, cur_ri, cur_riq,
+     cur_rr, cur_chance, cur_atime) = row
+    new_rb    = reward_balance        if reward_balance      is not None else cur_rb
+    new_re    = reward_exp            if reward_exp          is not None else cur_re
+    new_rt    = reward_tickets        if reward_tickets      is not None else cur_rt
+    new_rgt   = reward_gamble_tokens  if reward_gamble_tokens is not None else cur_rgt
+    new_rvk   = reward_vip_keys       if reward_vip_keys     is not None else cur_rvk
+    new_ri    = reward_item           if reward_item         is not None else cur_ri
+    new_riq   = reward_item_qty       if reward_item_qty     is not None else cur_riq
+    new_rr    = reward_role.id        if reward_role         is not None else cur_rr
+    new_ch    = chance                if chance              is not None else cur_chance
+    new_at    = answer_time           if answer_time         is not None else cur_atime
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE games SET reward_balance=?,reward_exp=?,reward_tickets=?,"
+                "reward_gamble_tokens=?,reward_vip_keys=?,reward_item=?,reward_item_qty=?,"
+                "reward_role_id=?,chance=?,answer_time=? WHERE guild_id=? AND game_name=?",
+                (new_rb, new_re, new_rt, new_rgt, new_rvk, new_ri, new_riq,
+                 new_rr, new_ch, new_at, interaction.guild.id, name))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Game **{name}** updated.\n"
+        f"Rewards: 💰{new_rb:,} ⭐{new_re:,} 🎟{new_rt} 🎲{new_rgt} 🔑{new_rvk}"
+        + (f" 🎒{new_riq}x {new_ri}" if new_ri else "")
+        + f" | Weight: {new_ch} | Time: {new_at}s")
+
+@bot.command(name="editgame")
+async def pfx_editgame(ctx, name: str, field: str, *, value: str):
+    """Edit one field at a time: !editgame <name> <field> <value>
+    Fields: balance, exp, tickets, gamble_tokens, vip_keys, item, item_qty, chance, answer_time"""
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    field_map = {
+        "balance": "reward_balance", "exp": "reward_exp", "tickets": "reward_tickets",
+        "gamble_tokens": "reward_gamble_tokens", "vip_keys": "reward_vip_keys",
+        "item": "reward_item", "item_qty": "reward_item_qty",
+        "chance": "chance", "answer_time": "answer_time",
+    }
+    col = field_map.get(field.lower())
+    if not col:
+        await ctx.send(f"❌ Valid fields: {', '.join(field_map)}"); return
+    async with get_db() as db:
+        async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
+                              (ctx.guild.id, name)) as cur:
+            if not await cur.fetchone():
+                await ctx.send(f"❌ Game **{name}** not found."); return
+    try:
+        typed_val = float(value) if col in ("chance",) else (
+            int(value) if col not in ("reward_item",) else value)
+    except ValueError:
+        typed_val = value
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(f"UPDATE games SET {col}=? WHERE guild_id=? AND game_name=?",
+                             (typed_val, ctx.guild.id, name))
+            await db.commit()
+    await ctx.send(f"✅ Game **{name}** — **{field}** set to `{typed_val}`.")
+
+# ── game answers & hints ──────────────────────────────────────────────────────
+@bot.tree.command(name="addgameanswer", description="Add an answer to a game")
+@app_commands.describe(game_name="Game name (spaces allowed)", answer="The correct answer")
+@command_enabled()
+async def slash_addgameanswer(interaction: discord.Interaction, game_name: str, answer: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with get_db() as db:
+        async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
+                              (interaction.guild.id, game_name)) as cur:
+            if not await cur.fetchone():
+                await interaction.response.send_message(
+                    f"❌ Game **{game_name}** not found.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            cur = await db.execute("INSERT INTO game_answers(guild_id,game_name,answer) VALUES(?,?,?)",
+                                   (interaction.guild.id, game_name, answer))
+            new_id = cur.lastrowid
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Added answer `{answer}` to **{game_name}** (ID: #{new_id}).\n"
+        f"Use `/addhint {game_name} {new_id} <order 1-5> <hint text>` to add hints.")
+
+# Updated prefix version — game names with spaces need quotes: !addgameanswer "My Game" answer
+@bot.command(name="addgameanswer")
+async def pfx_addgameanswer(ctx, *, args: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    game_name, answer = _parse_game_name_and_rest(args)
+    if not game_name or not answer:
+        await ctx.send(f'❌ Usage: `{common._BOT_PREFIX}addgameanswer "Game Name" answer text`\n'
+                       'Game names with spaces must be in quotes.'); return
+    await slash_addgameanswer._callback(FakeInteraction(ctx), game_name, answer)
+
+
+@bot.tree.command(name="removegameanswer", description="Remove an answer from a game by its ID")
+@app_commands.describe(game_name="Game name", answer_id="Answer ID from /listgames <name>")
+@command_enabled()
+async def slash_removegameanswer(interaction: discord.Interaction, game_name: str, answer_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT id FROM game_answers WHERE id=? AND guild_id=? AND game_name=?",
+                                  (answer_id, interaction.guild.id, game_name)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(
+                        f"❌ Answer #{answer_id} not found in **{game_name}**.", ephemeral=True); return
+            await db.execute("DELETE FROM game_answers WHERE id=?", (answer_id,))
+            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=? AND answer_id=?",
+                             (interaction.guild.id, game_name, answer_id))
+            await db.commit()
+    await interaction.response.send_message(
+        f"🗑 Removed answer #{answer_id} and its hints from **{game_name}**.")
+
+@bot.command(name="removegameanswer")
+async def pfx_removegameanswer(ctx, *, args: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    game_name, rest = _parse_game_name_and_rest(args)
+    try: answer_id = int(rest)
+    except ValueError:
+        await ctx.send(f'❌ Usage: `{common._BOT_PREFIX}removegameanswer "Game Name" <answer_id>`'); return
+    await slash_removegameanswer._callback(FakeInteraction(ctx), game_name, answer_id)
+
+
+@bot.tree.command(name="listgames", description="List all games, or answers for a specific game")
+@app_commands.describe(game_name="Leave blank to list all games, or enter a name to see its answers")
+@command_enabled()
+async def slash_listgames(interaction: discord.Interaction, game_name: str = None):
+    await interaction.response.defer()
+    gid = interaction.guild.id
+    if game_name is None:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT game_name,enabled,reward_balance,reward_exp,chance,answer_time "
+                "FROM games WHERE guild_id=?", (gid,)) as cur:
+                games = await cur.fetchall()
+        if not games:
+            await interaction.followup.send("❌ No games configured."); return
+        lines = []
+        for gname, enabled, rb, re, chance, atime in games:
+            status = "✅" if enabled else "🔒"
+            lines.append(f"{status} **{gname}** | 💰{rb:,} ⭐{re:,} | ⚖️{chance} ⏱{atime}s")
+        embed = discord.Embed(title="🎮 Random Games", description="\n".join(lines), color=discord.Color.teal())
+        await interaction.followup.send(embed=embed)
+    else:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT a.id,a.answer,COUNT(h.id) FROM game_answers a "
+                "LEFT JOIN game_hints h ON h.answer_id=a.id AND h.guild_id=a.guild_id "
+                "WHERE a.guild_id=? AND a.game_name=? GROUP BY a.id ORDER BY a.id",
+                (gid, game_name)) as cur:
+                answers = await cur.fetchall()
+        if not answers:
+            await interaction.followup.send(f"❌ No answers for **{game_name}** (or game not found)."); return
+        lines = [f"`#{aid}` {'🔔'*hc if hc else '·'} {ans}" for aid, ans, hc in answers]
+        text = "\n".join(lines)
+        if len(text) > 1900: text = text[:1900] + "..."
+        embed = discord.Embed(title=f"🎯 {game_name}", description=text, color=discord.Color.teal())
+        await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="addhint", description="Add or replace a hint for a specific answer")
+@app_commands.describe(game_name="Game name", answer_id="Answer ID from /listgames <name>",
+                       order="Hint order 1-5 (revealed progressively)", hint="Hint text")
+@command_enabled()
+async def slash_addhint(interaction: discord.Interaction, game_name: str,
+                        answer_id: int, order: int, hint: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if not (1 <= order <= 5):
+        await interaction.response.send_message("❌ Order must be 1–5.", ephemeral=True); return
+    async with get_db() as db:
+        async with db.execute("SELECT answer FROM game_answers WHERE id=? AND guild_id=? AND game_name=?",
+                              (answer_id, interaction.guild.id, game_name)) as cur:
+            ans_row = await cur.fetchone()
+    if not ans_row:
+        await interaction.response.send_message(
+            f"❌ Answer #{answer_id} not found in **{game_name}**.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=? AND answer_id=? AND hint_order=?",
+                             (interaction.guild.id, game_name, answer_id, order))
+            await db.execute("INSERT INTO game_hints(guild_id,game_name,answer_id,hint_text,hint_order) VALUES(?,?,?,?,?)",
+                             (interaction.guild.id, game_name, answer_id, hint, order))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Hint #{order} set for answer **{ans_row[0]}** (#{answer_id}) in **{game_name}**.")
+
+@bot.command(name="addhint")
+async def pfx_addhint(ctx, *, args: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    # Format: "Game Name" answer_id order hint text
+    game_name, rest = _parse_game_name_and_rest(args)
+    parts = rest.split(None, 2)
+    if len(parts) < 3:
+        await ctx.send(f'❌ Usage: `{common._BOT_PREFIX}addhint "Game Name" <answer_id> <order 1-5> <hint>`'); return
+    try: answer_id, order = int(parts[0]), int(parts[1])
+    except ValueError:
+        await ctx.send("❌ answer_id and order must be numbers."); return
+    hint = parts[2]
+    await slash_addhint._callback(FakeInteraction(ctx), game_name, answer_id, order, hint)
+
+
+@bot.tree.command(name="removehint", description="Remove a hint by its ID")
+@app_commands.describe(hint_id="Hint ID from /listhints")
+@command_enabled()
+async def slash_removehint(interaction: discord.Interaction, hint_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute("SELECT hint_text FROM game_hints WHERE id=? AND guild_id=?",
+                                  (hint_id, interaction.guild.id)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(f"❌ Hint #{hint_id} not found.", ephemeral=True); return
+            await db.execute("DELETE FROM game_hints WHERE id=?", (hint_id,))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed hint #{hint_id}.")
+
+
+@bot.tree.command(name="listhints", description="List hints for a game (all answers, or one answer)")
+@app_commands.describe(game_name="Game name", answer_id="Filter to a specific answer ID (optional)")
+@command_enabled()
+async def slash_listhints(interaction: discord.Interaction, game_name: str, answer_id: int = None):
+    await interaction.response.defer()
+    async with get_db() as db:
+        if answer_id is not None:
+            async with db.execute(
+                "SELECT h.id,a.id,a.answer,h.hint_order,h.hint_text "
+                "FROM game_hints h JOIN game_answers a ON h.answer_id=a.id "
+                "WHERE h.guild_id=? AND h.game_name=? AND h.answer_id=? ORDER BY h.hint_order",
+                (interaction.guild.id, game_name, answer_id)) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                "SELECT h.id,a.id,a.answer,h.hint_order,h.hint_text "
+                "FROM game_hints h JOIN game_answers a ON h.answer_id=a.id "
+                "WHERE h.guild_id=? AND h.game_name=? ORDER BY a.id,h.hint_order",
+                (interaction.guild.id, game_name)) as cur:
+                rows = await cur.fetchall()
+    if not rows:
+        await interaction.followup.send(f"❌ No hints found for **{game_name}**."); return
+    lines = []; last_aid = None
+    for h_id, a_id, answer, h_order, h_text in rows:
+        if a_id != last_aid: lines.append(f"**`#{a_id}` {answer}**"); last_aid = a_id
+        lines.append(f"  `[#{h_id}]` Hint {h_order}: {h_text}")
+    text = "\n".join(lines)
+    if len(text) > 1900: text = text[:1900] + "..."
+    embed = discord.Embed(title=f"💡 Hints — {game_name}", description=text, color=discord.Color.teal())
+    await interaction.followup.send(embed=embed)
+
+
+@bot.tree.command(name="stopgames", description="Stop the random games loop")
+@command_enabled()
+async def slash_stopgames(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    gid = interaction.guild.id
+    task = game_tasks.pop(gid, None)
+    if task: task.cancel()
+    active_game_sessions.pop(gid, None)
+    await interaction.response.send_message("🛑 Random games stopped.")
+
+
+# ── Prefix wrappers for single-name commands (use * to capture full name) ─────
+# Replace the existing prefix versions of these commands with these:
+
+@bot.command(name="removegame")
+async def pfx_removegame_new(ctx, *, name: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_removegame._callback(FakeInteraction(ctx), name)
+
+@bot.command(name="enablegame")
+async def pfx_enablegame_new(ctx, *, name: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_enablegame._callback(FakeInteraction(ctx), name)
+
+@bot.command(name="disablegame")
+async def pfx_disablegame_new(ctx, *, name: str):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_disablegame._callback(FakeInteraction(ctx), name)
+
+@bot.command(name="listgames")
+async def pfx_listgames_new(ctx, *, game_name: str = None):
+    await slash_listgames._callback(FakeInteraction(ctx), game_name)
+
+@bot.command(name="listhints")
+async def pfx_listhints_new(ctx, *, game_name: str):
+    await slash_listhints._callback(FakeInteraction(ctx), game_name, None)
+
+@bot.command(name="stopgiveaways")
+async def pfx_stopgiveaways_new(ctx):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_stopgiveaways._callback(FakeInteraction(ctx))
+
+@bot.command(name="stopgames")
+async def pfx_stopgames_new(ctx):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_stopgames._callback(FakeInteraction(ctx))
+
+@bot.command(name="giveawayroles")
+async def pfx_giveawayroles_new(ctx):
+    await slash_giveawayroles._callback(FakeInteraction(ctx))
+
+@bot.command(name="removeautogiveaway")
+async def pfx_removeautogiveaway_new(ctx, entry_id: int):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_removeautogiveaway._callback(FakeInteraction(ctx), entry_id)
+
+@bot.command(name="listautogiveaways")
+async def pfx_listautogiveaways_new(ctx):
+    await slash_listautogiveaways._callback(FakeInteraction(ctx))
+
+# =================================================================================
+
 @bot.tree.command(name="addgame", description="Add a random game to the pool")
 @app_commands.describe(
     name="The question/prompt shown to players",
@@ -1297,45 +1760,6 @@ async def pfx_addgame(ctx, name: str, reward_balance: int = 0, reward_exp: int =
     await addgame._callback(FakeInteraction(ctx), name, reward_balance, reward_exp,
                             0, 0, 0, None, 1, None, chance, answer_time)
 
-
-@bot.command(name="removegame")
-async def cmd_removegame(ctx, *, name: str):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
-                                  (ctx.guild.id, name)) as cur:
-                if not await cur.fetchone(): await ctx.send(f"❌ Game **{name}** not found."); return
-            await db.execute("DELETE FROM games WHERE guild_id=? AND game_name=?", (ctx.guild.id, name))
-            await db.execute("DELETE FROM game_answers WHERE guild_id=? AND game_name=?", (ctx.guild.id, name))
-            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=?", (ctx.guild.id, name))
-            await db.commit()
-    await ctx.send(f"🗑 Removed game **{name}** and all its answers and hints.")
-
-@bot.command(name="enablegame")
-async def cmd_enablegame(ctx, *, name: str):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
-                                  (ctx.guild.id, name)) as cur:
-                if not await cur.fetchone(): await ctx.send(f"❌ Game **{name}** not found."); return
-            await db.execute("UPDATE games SET enabled=1 WHERE guild_id=? AND game_name=?", (ctx.guild.id, name))
-            await db.commit()
-    await ctx.send(f"✅ Game **{name}** enabled.")
-
-@bot.command(name="disablegame")
-async def cmd_disablegame(ctx, *, name: str):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
-                                  (ctx.guild.id, name)) as cur:
-                if not await cur.fetchone(): await ctx.send(f"❌ Game **{name}** not found."); return
-            await db.execute("UPDATE games SET enabled=0 WHERE guild_id=? AND game_name=?", (ctx.guild.id, name))
-            await db.commit()
-    await ctx.send(f"🔒 Game **{name}** disabled.")
-
 @bot.command(name="addgameanswer")
 async def cmd_addgameanswer(ctx, game_name: str, *, answer: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
@@ -1366,46 +1790,6 @@ async def cmd_removegameanswer(ctx, game_name: str, answer_id: int):
             await db.commit()
     await ctx.send(f"🗑 Removed answer #{answer_id} and its hints from **{game_name}**.")
 
-@bot.command(name="listgames")
-async def cmd_listgames(ctx, *, game_name: str = None):
-    gid = ctx.guild.id
-    if game_name is None:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT game_name,enabled,reward_balance,reward_exp,chance,answer_time "
-                "FROM games WHERE guild_id=?", (gid,)) as cur:
-                games = await cur.fetchall()
-        if not games: await ctx.send("❌ No games configured."); return
-        lines = []
-        for (gname, enabled, rb, re, chance, atime) in games:
-            status = "✅" if enabled else "🔒"
-            lines.append(f"{status} **{gname}** | 💰{rb:,} ⭐{re:,} | ⚖️{chance} ⏱{atime}s")
-        embed = discord.Embed(title="🎮 Random Games", description="\n".join(lines), color=discord.Color.teal())
-        embed.set_footer(text=f"Use `{common._BOT_PREFIX}listgames <name>` to see a game's answers")
-        await ctx.send(embed=embed)
-    else:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT a.id, a.answer, COUNT(h.id) FROM game_answers a "
-                "LEFT JOIN game_hints h ON h.answer_id=a.id AND h.guild_id=a.guild_id "
-                "WHERE a.guild_id=? AND a.game_name=? GROUP BY a.id ORDER BY a.id",
-                (gid, game_name)) as cur:
-                answers = await cur.fetchall()
-        if not answers: await ctx.send(f"❌ No answers for **{game_name}** (or game not found)."); return
-        lines = [f"`#{aid}` {'🔔' * hc if hc else '·'} {ans}" for aid, ans, hc in answers]
-        chunks, buf = [], []
-        for line in lines:
-            buf.append(line)
-            if len("\n".join(buf)) > 1800:
-                chunks.append("\n".join(buf[:-1])); buf = [buf[-1]]
-        if buf: chunks.append("\n".join(buf))
-        for i, chunk in enumerate(chunks):
-            embed = discord.Embed(
-                title=f"🎯 {game_name}" + (f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""),
-                description=chunk, color=discord.Color.teal())
-            await ctx.send(embed=embed)
-
-
 @bot.command(name="addhint")
 async def cmd_addhint(ctx, game_name: str, answer_id: int, order: int, *, hint: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
@@ -1435,34 +1819,6 @@ async def cmd_removehint(ctx, hint_id: int):
             await db.execute("DELETE FROM game_hints WHERE id=?", (hint_id,))
             await db.commit()
     await ctx.send(f"🗑 Removed hint #{hint_id}.")
-
-@bot.command(name="listhints")
-async def cmd_listhints(ctx, game_name: str, answer_id: int = None):
-    async with get_db() as db:
-        if answer_id is not None:
-            async with db.execute(
-                "SELECT h.id,a.id,a.answer,h.hint_order,h.hint_text "
-                "FROM game_hints h JOIN game_answers a ON h.answer_id=a.id "
-                "WHERE h.guild_id=? AND h.game_name=? AND h.answer_id=? ORDER BY h.hint_order",
-                (ctx.guild.id, game_name, answer_id)) as cur:
-                rows = await cur.fetchall()
-        else:
-            async with db.execute(
-                "SELECT h.id,a.id,a.answer,h.hint_order,h.hint_text "
-                "FROM game_hints h JOIN game_answers a ON h.answer_id=a.id "
-                "WHERE h.guild_id=? AND h.game_name=? ORDER BY a.id,h.hint_order",
-                (ctx.guild.id, game_name)) as cur:
-                rows = await cur.fetchall()
-    if not rows: await ctx.send(f"❌ No hints found for **{game_name}**."); return
-    lines = []; last_aid = None
-    for h_id, a_id, answer, h_order, h_text in rows:
-        if a_id != last_aid: lines.append(f"**`#{a_id}` {answer}**"); last_aid = a_id
-        lines.append(f"  `[#{h_id}]` Hint {h_order}: {h_text}")
-    text = "\n".join(lines)
-    if len(text) > 1900: text = text[:1900] + "..."
-    embed = discord.Embed(title=f"💡 Hints — {game_name}", description=text, color=discord.Color.teal())
-    await ctx.send(embed=embed)
-
 
 @bot.tree.command(name="addgamepreset", description="Bulk-add a preset of answers (and hints) to a game")
 @app_commands.describe(game_name="Game to add answers to", preset="Which preset to load")
@@ -1571,17 +1927,7 @@ async def startgames(interaction: discord.Interaction):
 async def pfx_startgames(ctx):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
     await startgames._callback(FakeInteraction(ctx))
-
-@bot.command(name="stopgames")
-async def cmd_stopgames(ctx):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    gid = ctx.guild.id
-    task = game_tasks.pop(gid, None)
-    if task: task.cancel()
-    active_game_sessions.pop(gid, None)
-    await ctx.send("🛑 Random games stopped.")
-
-
+    
 # ═══════════════════════════════════════════════════════
 # GAME LOOP
 # ═══════════════════════════════════════════════════════
