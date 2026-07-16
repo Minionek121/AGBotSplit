@@ -1760,24 +1760,6 @@ async def pfx_addgame(ctx, name: str, reward_balance: int = 0, reward_exp: int =
     await addgame._callback(FakeInteraction(ctx), name, reward_balance, reward_exp,
                             0, 0, 0, None, 1, None, chance, answer_time)
 
-@bot.command(name="addhint")
-async def cmd_addhint(ctx, game_name: str, answer_id: int, order: int, *, hint: str):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    if not (1 <= order <= 5): await ctx.send("❌ Order must be 1–5."); return
-    async with get_db() as db:
-        async with db.execute("SELECT answer FROM game_answers WHERE id=? AND guild_id=? AND game_name=?",
-                              (answer_id, ctx.guild.id, game_name)) as cur:
-            ans_row = await cur.fetchone()
-    if not ans_row: await ctx.send(f"❌ Answer #{answer_id} not found in **{game_name}**."); return
-    async with db_lock:
-        async with get_db() as db:
-            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=? AND answer_id=? AND hint_order=?",
-                             (ctx.guild.id, game_name, answer_id, order))
-            await db.execute("INSERT INTO game_hints(guild_id,game_name,answer_id,hint_text,hint_order) VALUES(?,?,?,?,?)",
-                             (ctx.guild.id, game_name, answer_id, hint, order))
-            await db.commit()
-    await ctx.send(f"✅ Hint #{order} set for answer **{ans_row[0]}** (#{answer_id}) in **{game_name}**.")
-
 @bot.tree.command(name="addgamepreset", description="Bulk-add a preset of answers (and hints) to a game")
 @app_commands.describe(game_name="Game to add answers to", preset="Which preset to load")
 @app_commands.choices(preset=_PRESET_CHOICES)
