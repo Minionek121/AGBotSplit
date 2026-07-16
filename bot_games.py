@@ -1760,20 +1760,6 @@ async def pfx_addgame(ctx, name: str, reward_balance: int = 0, reward_exp: int =
     await addgame._callback(FakeInteraction(ctx), name, reward_balance, reward_exp,
                             0, 0, 0, None, 1, None, chance, answer_time)
 
-@bot.command(name="removegameanswer")
-async def cmd_removegameanswer(ctx, game_name: str, answer_id: int):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT id FROM game_answers WHERE id=? AND guild_id=? AND game_name=?",
-                                  (answer_id, ctx.guild.id, game_name)) as cur:
-                if not await cur.fetchone(): await ctx.send(f"❌ Answer #{answer_id} not found."); return
-            await db.execute("DELETE FROM game_answers WHERE id=?", (answer_id,))
-            await db.execute("DELETE FROM game_hints WHERE guild_id=? AND game_name=? AND answer_id=?",
-                             (ctx.guild.id, game_name, answer_id))
-            await db.commit()
-    await ctx.send(f"🗑 Removed answer #{answer_id} and its hints from **{game_name}**.")
-
 @bot.command(name="addhint")
 async def cmd_addhint(ctx, game_name: str, answer_id: int, order: int, *, hint: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
