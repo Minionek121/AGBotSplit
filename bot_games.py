@@ -1778,18 +1778,6 @@ async def cmd_addhint(ctx, game_name: str, answer_id: int, order: int, *, hint: 
             await db.commit()
     await ctx.send(f"✅ Hint #{order} set for answer **{ans_row[0]}** (#{answer_id}) in **{game_name}**.")
 
-@bot.command(name="removehint")
-async def cmd_removehint(ctx, hint_id: int):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with db_lock:
-        async with get_db() as db:
-            async with db.execute("SELECT hint_text FROM game_hints WHERE id=? AND guild_id=?",
-                                  (hint_id, ctx.guild.id)) as cur:
-                if not await cur.fetchone(): await ctx.send(f"❌ Hint #{hint_id} not found."); return
-            await db.execute("DELETE FROM game_hints WHERE id=?", (hint_id,))
-            await db.commit()
-    await ctx.send(f"🗑 Removed hint #{hint_id}.")
-
 @bot.tree.command(name="addgamepreset", description="Bulk-add a preset of answers (and hints) to a game")
 @app_commands.describe(game_name="Game to add answers to", preset="Which preset to load")
 @app_commands.choices(preset=_PRESET_CHOICES)
