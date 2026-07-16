@@ -1760,22 +1760,6 @@ async def pfx_addgame(ctx, name: str, reward_balance: int = 0, reward_exp: int =
     await addgame._callback(FakeInteraction(ctx), name, reward_balance, reward_exp,
                             0, 0, 0, None, 1, None, chance, answer_time)
 
-@bot.command(name="addgameanswer")
-async def cmd_addgameanswer(ctx, game_name: str, *, answer: str):
-    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    async with get_db() as db:
-        async with db.execute("SELECT game_name FROM games WHERE guild_id=? AND game_name=?",
-                              (ctx.guild.id, game_name)) as cur:
-            if not await cur.fetchone(): await ctx.send(f"❌ Game **{game_name}** not found."); return
-    async with db_lock:
-        async with get_db() as db:
-            cur = await db.execute("INSERT INTO game_answers(guild_id,game_name,answer) VALUES(?,?,?)",
-                                   (ctx.guild.id, game_name, answer))
-            new_id = cur.lastrowid
-            await db.commit()
-    await ctx.send(f"✅ Added answer `{answer}` to **{game_name}** (ID: #{new_id}).\n"
-                   f"Use `!addhint {game_name} {new_id} <order 1-5> <hint text>` to add hints.")
-
 @bot.command(name="removegameanswer")
 async def cmd_removegameanswer(ctx, game_name: str, answer_id: int):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
