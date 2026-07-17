@@ -960,7 +960,7 @@ async def pfx_removenotifychannel(ctx):
 
 def _ch(sub_region: str, continent: str, cap_letter: str, country_name: str) -> list[str]:
     return [
-        f"It is located in {sub_region}, {continent}",
+        f"It is located in {sub_region} {continent}",
         f"Its capital city starts with the letter '{cap_letter}'",
         f"The country name starts with the letter '{country_name[0]}'",
     ]
