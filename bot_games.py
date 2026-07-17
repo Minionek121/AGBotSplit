@@ -1027,7 +1027,7 @@ _PRESET_DATA: dict[str, dict] = {
             "Gyoza":        ["Japanese dumplings", "Usually filled with pork and cabbage"],
         }
     },
-    countries_africa = {
+    "countries_africa" = {
         "description": "All countries in Africa",
         "answers_hints": {
             # Northern Africa
@@ -1092,7 +1092,7 @@ _PRESET_DATA: dict[str, dict] = {
         }
     }
 
-    countries_europe = {
+    "countries_europe" = {
         "description": "All countries in Europe",
         "answers_hints": {
             # Northern Europe
@@ -1148,7 +1148,7 @@ _PRESET_DATA: dict[str, dict] = {
         }
     }
 
-    countries_asia = {
+    "countries_asia" = {
         "description": "All countries in Asia",
         "answers_hints": {
             # Central Asia
@@ -1207,7 +1207,7 @@ _PRESET_DATA: dict[str, dict] = {
         }
     }
 
-    countries_americas = {
+    "countries_americas" = {
         "description": "All countries in the Americas",
         "answers_hints": {
             # North America
@@ -1252,7 +1252,7 @@ _PRESET_DATA: dict[str, dict] = {
         }
     }
     
-    countries_oceania = {
+    "countries_oceania" = {
         "description": "All countries in Oceania",
         "answers_hints": {
             # Australia and New Zealand
@@ -1277,23 +1277,16 @@ _PRESET_DATA: dict[str, dict] = {
     }
 
     # ── Combined world preset ─────────────────────────────────────────────────────
-    countries_world = {
+    "countries_world" = {
         "description": "Every country in the world",
         "answers_hints": {
-            **countries_africa["answers_hints"],
-            **countries_europe["answers_hints"],
-            **countries_asia["answers_hints"],
-            **countries_americas["answers_hints"],
-            **countries_oceania["answers_hints"],
+            **"countries_africa"["answers_hints"],
+            **"countries_europe"["answers_hints"],
+            **"countries_asia"["answers_hints"],
+            **"countries_americas"["answers_hints"],
+            **"countries_oceania"["answers_hints"],
         }
     }
-
-    "countries_africa":   countries_africa,
-    "countries_europe":   countries_europe,
-    "countries_asia":     countries_asia,
-    "countries_americas": countries_americas,
-    "countries_oceania":  countries_oceania,
-    "countries_world":    countries_world,
 
     "fruits": {
         "description": "Common fruits",
