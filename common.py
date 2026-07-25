@@ -312,7 +312,7 @@ _SYSTEM_CHOICES = [
 ]
  
 # ═══════════════════════════════════════════════════════
-# PREFIX  (mutable — see module docstring for how to change it safely)
+# PREFIX 
 # ═══════════════════════════════════════════════════════
  
 _BOT_PREFIX = "!"
@@ -340,7 +340,7 @@ async def set_prefix(new_prefix: str):
  
  
 # ═══════════════════════════════════════════════════════
-# DISABLED COMMANDS / SYSTEM TOGGLES  (shared mutable state)
+# DISABLED COMMANDS / SYSTEM TOGGLES 
 # ═══════════════════════════════════════════════════════
  
 disabled_commands: dict[int, set[str]] = {}
@@ -428,10 +428,9 @@ async def _is_allowed_ctx(ctx: commands.Context) -> bool:
  
  
 # ═══════════════════════════════════════════════════════
-# PREFIX-CHANNEL RESTRICTIONS  (shared mutable state)
+# PREFIX-CHANNEL RESTRICTIONS  
 # ═══════════════════════════════════════════════════════
  
-# {(guild_id, channel_id): {role_id: allowed_bool}}  — role_id 0 = "everyone" default
 prefix_channel_rules: dict[tuple[int, int], dict[int, bool]] = {}
  
 async def load_prefix_restrictions():
@@ -467,7 +466,7 @@ def _prefix_channel_allowed(message: discord.Message) -> bool:
  
  
 # ═══════════════════════════════════════════════════════
-# BALANCE  (guild-scoped) + balance ranks
+# BALANCE  
 # ═══════════════════════════════════════════════════════
  
 async def get_balance(guild_id: int, user_id: int) -> int:
@@ -499,7 +498,6 @@ async def add_balance(guild_id: int, user_id: int, amount: int, bot=None):
                 (guild_id, user_id))
             await db.commit()
  
-    # Use the provided bot, or find any registered bot that can see this guild
     _bot = bot
     if _bot is None:
         for b in _bot_instances:
@@ -782,7 +780,7 @@ def _weighted_sample_without_replacement(items_weights: list, k: int) -> list:
 # LOGGING
 # ═══════════════════════════════════════════════════════
  
-_bot_instances: list = []   # populated by each bot file via register_bot_instance()
+_bot_instances: list = []  
  
 def register_bot_instance(bot: commands.Bot):
     """Each bot file calls this once at import time so log_event/get_channel
@@ -826,8 +824,7 @@ def find_guild(guild_id: int):
  
  
 # ═══════════════════════════════════════════════════════
-# GIVEAWAY PRIZE DISTRIBUTION  (shared by /giveaway, /host, auto giveaways,
-# and power giveaways)
+# GIVEAWAY PRIZE DISTRIBUTION  
 # ═══════════════════════════════════════════════════════
  
 async def distribute_prizes(guild, winners, meta):
@@ -874,7 +871,7 @@ def build_reward_summary(meta, guild=None) -> str:
  
  
 # ═══════════════════════════════════════════════════════
-# RESET HELPER  (used by admin panel + /resetuser + /resetrole, all in bot_admin)
+# RESET HELPER 
 # ═══════════════════════════════════════════════════════
  
 async def _do_reset(guild_id: int, user_id: int, reset_type: str):
@@ -959,7 +956,7 @@ async def msg_count_flush_loop(bot: commands.Bot):
  
  
 # ═══════════════════════════════════════════════════════
-# FAKE INTERACTION  — lets prefix commands call slash callbacks directly
+# FAKE INTERACTION  
 # ═══════════════════════════════════════════════════════
  
 class FakeInteraction:
