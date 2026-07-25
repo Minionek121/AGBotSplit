@@ -5,8 +5,7 @@ import sys
 from dotenv import load_dotenv
  
 load_dotenv()
- 
-# Force stdout/stderr to flush immediately — belt AND suspenders alongside PYTHONUNBUFFERED=1
+
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
  
