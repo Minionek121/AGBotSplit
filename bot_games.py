@@ -239,9 +239,7 @@ async def host(interaction: discord.Interaction, amount: int, winners: int = 1,
         await interaction.response.send_message(
             f"❌ Amount ÷ winners = {per_winner} — each winner must receive at least 1 coin.", ephemeral=True); return
 
-    # Deduct upfront
     await add_balance(gid, uid, -amount, bot=bot)
-    # Track hosted_balance stat
     await add_stat(gid, uid, "hosted_balance", amount)
 
     target_channel = channel or interaction.channel
@@ -968,14 +966,12 @@ def _ch(sub_region: str, continent: str, cap_letter: str, country_name: str) -> 
 countries_africa = {
     "description": "All countries in Africa",
     "answers_hints": {
-        # Northern Africa
         "Algeria":                      _ch("Northern","Africa","A","Algeria"),
         "Egypt":                        _ch("Northern","Africa","C","Egypt"),
         "Libya":                        _ch("Northern","Africa","T","Libya"),
         "Morocco":                      _ch("Northern","Africa","R","Morocco"),
         "Sudan":                        _ch("Northern","Africa","K","Sudan"),
         "Tunisia":                      _ch("Northern","Africa","T","Tunisia"),
-        # Western Africa
         "Benin":                        _ch("Western","Africa","P","Benin"),
         "Burkina Faso":                 _ch("Western","Africa","O","Burkina Faso"),
         "Cape Verde":                   _ch("Western","Africa","P","Cape Verde"),
@@ -992,7 +988,6 @@ countries_africa = {
         "Senegal":                      _ch("Western","Africa","D","Senegal"),
         "Sierra Leone":                 _ch("Western","Africa","F","Sierra Leone"),
         "Togo":                         _ch("Western","Africa","L","Togo"),
-        # Central Africa
         "Angola":                       _ch("Central","Africa","L","Angola"),
         "Cameroon":                     _ch("Central","Africa","Y","Cameroon"),
         "Central African Republic":     _ch("Central","Africa","B","Central African Republic"),
@@ -1002,7 +997,6 @@ countries_africa = {
         "Gabon":                        _ch("Central","Africa","L","Gabon"),
         "Republic of the Congo":        _ch("Central","Africa","B","Republic of the Congo"),
         "Sao Tome and Principe":        _ch("Central","Africa","S","Sao Tome and Principe"),
-        # Eastern Africa
         "Burundi":                      _ch("Eastern","Africa","G","Burundi"),
         "Comoros":                      _ch("Eastern","Africa","M","Comoros"),
         "Djibouti":                     _ch("Eastern","Africa","D","Djibouti"),
@@ -1021,7 +1015,6 @@ countries_africa = {
         "Uganda":                       _ch("Eastern","Africa","K","Uganda"),
         "Zambia":                       _ch("Eastern","Africa","L","Zambia"),
         "Zimbabwe":                     _ch("Eastern","Africa","H","Zimbabwe"),
-        # Southern Africa
         "Botswana":                     _ch("Southern","Africa","G","Botswana"),
         "Eswatini":                     _ch("Southern","Africa","M","Eswatini"),
         "Lesotho":                      _ch("Southern","Africa","M","Lesotho"),
@@ -1033,7 +1026,6 @@ countries_africa = {
 countries_europe = {
     "description": "All countries in Europe",
     "answers_hints": {
-        # Northern Europe
         "Denmark":                      _ch("Northern","Europe","C","Denmark"),
         "Estonia":                      _ch("Northern","Europe","T","Estonia"),
         "Finland":                      _ch("Northern","Europe","H","Finland"),
@@ -1044,7 +1036,6 @@ countries_europe = {
         "Norway":                       _ch("Northern","Europe","O","Norway"),
         "Sweden":                       _ch("Northern","Europe","S","Sweden"),
         "United Kingdom":               _ch("Northern","Europe","L","United Kingdom"),
-        # Western Europe
         "Austria":                      _ch("Western","Europe","V","Austria"),
         "Belgium":                      _ch("Western","Europe","B","Belgium"),
         "France":                       _ch("Western","Europe","P","France"),
@@ -1054,7 +1045,6 @@ countries_europe = {
         "Monaco":                       _ch("Western","Europe","M","Monaco"),
         "Netherlands":                  _ch("Western","Europe","A","Netherlands"),
         "Switzerland":                  _ch("Western","Europe","B","Switzerland"),
-        # Southern Europe
         "Albania":                      _ch("Southern","Europe","T","Albania"),
         "Andorra":                      _ch("Southern","Europe","A","Andorra"),
         "Bosnia and Herzegovina":       _ch("Southern","Europe","S","Bosnia and Herzegovina"),
@@ -1072,7 +1062,6 @@ countries_europe = {
         "Slovenia":                     _ch("Southern","Europe","L","Slovenia"),
         "Spain":                        _ch("Southern","Europe","M","Spain"),
         "Vatican City":                 _ch("Southern","Europe","V","Vatican City"),
-        # Eastern Europe
         "Belarus":                      _ch("Eastern","Europe","M","Belarus"),
         "Bulgaria":                     _ch("Eastern","Europe","S","Bulgaria"),
         "Czech Republic":               _ch("Eastern","Europe","P","Czech Republic"),
@@ -1089,20 +1078,17 @@ countries_europe = {
 countries_asia = {
     "description": "All countries in Asia",
     "answers_hints": {
-        # Central Asia
         "Kazakhstan":                   _ch("Central","Asia","A","Kazakhstan"),
         "Kyrgyzstan":                   _ch("Central","Asia","B","Kyrgyzstan"),
         "Tajikistan":                   _ch("Central","Asia","D","Tajikistan"),
         "Turkmenistan":                 _ch("Central","Asia","A","Turkmenistan"),
         "Uzbekistan":                   _ch("Central","Asia","T","Uzbekistan"),
-        # East Asia
         "China":                        _ch("East","Asia","B","China"),
         "Japan":                        _ch("East","Asia","T","Japan"),
         "Mongolia":                     _ch("East","Asia","U","Mongolia"),
         "North Korea":                  _ch("East","Asia","P","North Korea"),
         "South Korea":                  _ch("East","Asia","S","South Korea"),
         "Taiwan":                       _ch("East","Asia","T","Taiwan"),
-        # South Asia
         "Afghanistan":                  _ch("South","Asia","K","Afghanistan"),
         "Bangladesh":                   _ch("South","Asia","D","Bangladesh"),
         "Bhutan":                       _ch("South","Asia","T","Bhutan"),
@@ -1111,7 +1097,6 @@ countries_asia = {
         "Nepal":                        _ch("South","Asia","K","Nepal"),
         "Pakistan":                     _ch("South","Asia","I","Pakistan"),
         "Sri Lanka":                    _ch("South","Asia","S","Sri Lanka"),
-        # Southeast Asia
         "Brunei":                       _ch("Southeast","Asia","B","Brunei"),
         "Cambodia":                     _ch("Southeast","Asia","P","Cambodia"),
         "Indonesia":                    _ch("Southeast","Asia","J","Indonesia"),
@@ -1123,7 +1108,6 @@ countries_asia = {
         "Thailand":                     _ch("Southeast","Asia","B","Thailand"),
         "Timor-Leste":                  _ch("Southeast","Asia","D","Timor-Leste"),
         "Vietnam":                      _ch("Southeast","Asia","H","Vietnam"),
-        # Western Asia
         "Armenia":                      _ch("Western","Asia","Y","Armenia"),
         "Azerbaijan":                   _ch("Western","Asia","B","Azerbaijan"),
         "Bahrain":                      _ch("Western","Asia","M","Bahrain"),
@@ -1148,11 +1132,9 @@ countries_asia = {
 countries_americas = {
     "description": "All countries in the Americas",
     "answers_hints": {
-        # North America
         "Canada":                       _ch("North America","","O","Canada"),
         "Mexico":                       _ch("North America","","M","Mexico"),
         "United States":                _ch("North America","","W","United States"),
-        # Central America
         "Belize":                       _ch("Central America","","B","Belize"),
         "Costa Rica":                   _ch("Central America","","S","Costa Rica"),
         "El Salvador":                  _ch("Central America","","S","El Salvador"),
@@ -1160,7 +1142,6 @@ countries_americas = {
         "Honduras":                     _ch("Central America","","T","Honduras"),
         "Nicaragua":                    _ch("Central America","","M","Nicaragua"),
         "Panama":                       _ch("Central America","","P","Panama"),
-        # Caribbean
         "Antigua and Barbuda":          _ch("the Caribbean","","S","Antigua and Barbuda"),
         "Bahamas":                      _ch("the Caribbean","","N","Bahamas"),
         "Barbados":                     _ch("the Caribbean","","B","Barbados"),
@@ -1174,7 +1155,6 @@ countries_americas = {
         "Saint Lucia":                  _ch("the Caribbean","","C","Saint Lucia"),
         "Saint Vincent and the Grenadines": _ch("the Caribbean","","K","Saint Vincent and the Grenadines"),
         "Trinidad and Tobago":          _ch("the Caribbean","","P","Trinidad and Tobago"),
-        # South America
         "Argentina":                    _ch("South America","","B","Argentina"),
         "Bolivia":                      _ch("South America","","S","Bolivia"),
         "Brazil":                       _ch("South America","","B","Brazil"),
@@ -1193,28 +1173,23 @@ countries_americas = {
 countries_oceania = {
     "description": "All countries in Oceania",
     "answers_hints": {
-        # Australia and New Zealand
         "Australia":                    _ch("Australia and New Zealand","","C","Australia"),
         "New Zealand":                  _ch("Australia and New Zealand","","W","New Zealand"),
-        # Melanesia
         "Fiji":                         _ch("Melanesia,","Oceania","S","Fiji"),
         "Papua New Guinea":             _ch("Melanesia,","Oceania","P","Papua New Guinea"),
         "Solomon Islands":              _ch("Melanesia,","Oceania","H","Solomon Islands"),
         "Vanuatu":                      _ch("Melanesia,","Oceania","P","Vanuatu"),
-        # Micronesia
         "Kiribati":                     _ch("Micronesia,","Oceania","S","Kiribati"),
         "Marshall Islands":             _ch("Micronesia,","Oceania","M","Marshall Islands"),
         "Micronesia":                   _ch("Micronesia,","Oceania","P","Micronesia"),
         "Nauru":                        _ch("Micronesia,","Oceania","Y","Nauru"),
         "Palau":                        _ch("Micronesia,","Oceania","N","Palau"),
-        # Polynesia
         "Samoa":                        _ch("Polynesia,","Oceania","A","Samoa"),
         "Tonga":                        _ch("Polynesia,","Oceania","N","Tonga"),
         "Tuvalu":                       _ch("Polynesia,","Oceania","F","Tuvalu"),
     }
 }
 
-# ── Combined world preset ─────────────────────────────────────────────────────
 countries_world = {
     "description": "Every country in the world",
     "answers_hints": {
@@ -1342,7 +1317,6 @@ _PRESET_DATA: dict[str, dict] = {
     },
 }
 
-# Build world preset from all continents
 _PRESET_DATA["countries_world"] = {
     "description": "Countries from all continents",
     "answers_hints": {
@@ -1644,7 +1618,6 @@ async def slash_addgameanswer(interaction: discord.Interaction, game_name: str, 
         f"✅ Added answer `{answer}` to **{game_name}** (ID: #{new_id}).\n"
         f"Use `/addhint {game_name} {new_id} <order 1-5> <hint text>` to add hints.")
 
-# Updated prefix version — game names with spaces need quotes: !addgameanswer "My Game" answer
 @bot.command(name="addgameanswer")
 async def pfx_addgameanswer(ctx, *, args: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
@@ -1752,7 +1725,6 @@ async def slash_addhint(interaction: discord.Interaction, game_name: str,
 @bot.command(name="addhint")
 async def pfx_addhint(ctx, *, args: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    # Format: "Game Name" answer_id order hint text
     game_name, rest = _parse_game_name_and_rest(args)
     parts = rest.split(None, 2)
     if len(parts) < 3:
@@ -1824,10 +1796,6 @@ async def slash_stopgames(interaction: discord.Interaction):
     active_game_sessions.pop(gid, None)
     await interaction.response.send_message("🛑 Random games stopped.")
 
-
-# ── Prefix wrappers for single-name commands (use * to capture full name) ─────
-# Replace the existing prefix versions of these commands with these:
-
 @bot.command(name="removegame")
 async def pfx_removegame_new(ctx, *, name: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
@@ -1873,8 +1841,6 @@ async def pfx_removeautogiveaway_new(ctx, entry_id: int):
 @bot.command(name="listautogiveaways")
 async def pfx_listautogiveaways_new(ctx):
     await slash_listautogiveaways._callback(FakeInteraction(ctx))
-
-# =================================================================================
 
 @bot.tree.command(name="addgame", description="Add a random game to the pool")
 @app_commands.describe(
