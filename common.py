@@ -905,8 +905,7 @@ async def _do_reset(guild_id: int, user_id: int, reset_type: str):
  
  
 # ═══════════════════════════════════════════════════════
-# DAILY MESSAGE COUNT  (written by bot_admin's EXP-from-chat hook,
-# read by bot_games' /autoentry message-requirement check)
+# DAILY MESSAGE COUNT  
 # ═══════════════════════════════════════════════════════
  
 _msg_buf: dict[tuple[int, int], int] = {}
