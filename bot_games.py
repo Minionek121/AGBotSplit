@@ -17,8 +17,13 @@ from common import (
     VIP_CHEST_KEY, GAMBLE_TOKEN,
     disabled_commands, global_disabled_commands, load_disabled_commands,
     prefix_channel_rules, _prefix_channel_allowed, load_prefix_restrictions,
-    register_bot_instance,
+    register_bot_instance, parse_amount,
 )
+
+_HOST_CHANNEL_ID = 1527412254746742784
+_HOST_DURATION   = 30   # seconds
+_HOST_MIN_WINNERS = 3
+_HOST_MAX_WINNERS = 10
 
 TOKEN = os.getenv("TOKEN_GAMES")
 _GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -209,51 +214,66 @@ async def pfx_giveaway(ctx, prize: str, seconds: int, winners: int = 1,
 # /HOST — user-hosted balance giveaway
 # ═══════════════════════════════════════════════════════
 
-@bot.tree.command(name="host", description="Host a giveaway from your own balance — deducted immediately")
+@bot.tree.command(name="host",
+    description=f"Host a balance giveaway — {_HOST_MIN_WINNERS}–{_HOST_MAX_WINNERS} winners, "
+                f"{_HOST_DURATION}s, posted in the giveaway channel")
 @app_commands.describe(
-    amount="Amount to give away (deducted from your balance right now)",
-    winners="Number of winners (each gets amount ÷ winners)",
-    seconds="Duration in seconds (default 60)",
-    prize="Optional label shown in the embed (default: 'Balance Giveaway')",
-    channel="Channel to post in (default: current channel)",
-    required_role="Restrict entries to members with this role")
+    amount="Amount to give away — supports 1k, 1m, 1b, 1t, 1q, 1qn",
+    winners=f"Number of winners ({_HOST_MIN_WINNERS}–{_HOST_MAX_WINNERS})",
+    prize="Optional label shown in the embed (default: 'Balance Giveaway')")
 @command_enabled()
-async def host(interaction: discord.Interaction, amount: int, winners: int = 1,
-               seconds: int = 60, prize: str = "Balance Giveaway",
-               channel: discord.TextChannel = None, required_role: discord.Role = None):
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
-    if winners < 1:
-        await interaction.response.send_message("❌ Winners must be ≥ 1.", ephemeral=True); return
-    if seconds <= 0:
-        await interaction.response.send_message("❌ Duration must be > 0 seconds.", ephemeral=True); return
+async def host(interaction: discord.Interaction,
+               amount: str,
+               winners: int,
+               prize: str = "Balance Giveaway"):
+
+    # --- parse amount ---
+    parsed_amount = parse_amount(amount)
+    if parsed_amount is None or parsed_amount <= 0:
+        await interaction.response.send_message(
+            "❌ Invalid amount. Examples: `1000`, `500k`, `1m`.", ephemeral=True); return
+
+    # --- validate winners ---
+    if not (_HOST_MIN_WINNERS <= winners <= _HOST_MAX_WINNERS):
+        await interaction.response.send_message(
+            f"❌ Winners must be between **{_HOST_MIN_WINNERS}** and **{_HOST_MAX_WINNERS}**.",
+            ephemeral=True); return
 
     gid, uid = interaction.guild.id, interaction.user.id
     bal = await get_balance(gid, uid)
-    if bal < amount:
+    if bal < parsed_amount:
         await interaction.response.send_message(
-            f"❌ You need **{amount:,}** coins but only have **{bal:,}**.", ephemeral=True); return
+            f"❌ You need **{parsed_amount:,}** coins but only have **{bal:,}**.",
+            ephemeral=True); return
 
-    per_winner = amount // winners
+    per_winner = parsed_amount // winners
     if per_winner < 1:
         await interaction.response.send_message(
-            f"❌ Amount ÷ winners = {per_winner} — each winner must receive at least 1 coin.", ephemeral=True); return
+            f"❌ Amount ÷ winners = {per_winner} — each winner must receive at least 1 coin.",
+            ephemeral=True); return
 
-    await add_balance(gid, uid, -amount, bot=bot)
-    await add_stat(gid, uid, "hosted_balance", amount)
+    # --- fixed channel ---
+    target_channel = bot.get_channel(_HOST_CHANNEL_ID)
+    if target_channel is None:
+        await interaction.response.send_message(
+            "❌ Giveaway channel not found — ask an admin to check the bot config.",
+            ephemeral=True); return
 
-    target_channel = channel or interaction.channel
-    end_time = datetime.now(UTC) + timedelta(seconds=seconds)
+    await add_balance(gid, uid, -parsed_amount, bot=bot)
+    await add_stat(gid, uid, "hosted_balance", parsed_amount)
 
-    embed = discord.Embed(title="🎁 HOSTED GIVEAWAY 🎁",
-        description=(f"React with 🎉 to enter\n\n"
-                     f"**Prize:** {prize}\n"
-                     f"**Reward:** 💰 {per_winner:,} coins per winner\n"
-                     f"**Winners:** {winners}\n"
-                     f"**Ends:** <t:{int(end_time.timestamp())}:R>"),
+    end_time = datetime.now(UTC) + timedelta(seconds=_HOST_DURATION)
+
+    embed = discord.Embed(
+        title="🎁 HOSTED GIVEAWAY 🎁",
+        description=(
+            f"React with 🎉 to enter\n\n"
+            f"**Prize:** {prize}\n"
+            f"**Reward:** 💰 {per_winner:,} coins per winner\n"
+            f"**Winners:** {winners}\n"
+            f"**Ends:** <t:{int(end_time.timestamp())}:R>"),
         color=discord.Color.purple())
-    embed.set_footer(text=f"Hosted by {interaction.user.display_name} · Total pot: {amount:,} coins")
-    if required_role: embed.add_field(name="Required Role", value=required_role.mention, inline=False)
+    embed.set_footer(text=f"Hosted by {interaction.user.display_name} · Total pot: {parsed_amount:,} coins")
 
     message = await target_channel.send(embed=embed)
     await message.add_reaction("🎉")
@@ -264,27 +284,33 @@ async def host(interaction: discord.Interaction, amount: int, winners: int = 1,
     })
     async with get_db() as db:
         await db.execute(
-            "INSERT INTO giveaways(message_id,channel_id,prize,winners,reward,end_time,required_role,template,ended) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO giveaways(message_id,channel_id,prize,winners,reward,"
+            "end_time,required_role,template,ended) VALUES(?,?,?,?,?,?,?,?,?)",
             (message.id, target_channel.id, prize_meta, winners, per_winner,
-             int(end_time.timestamp()), required_role.id if required_role else 0, "gold", 0))
+             int(end_time.timestamp()), 0, "gold", 0))
         await db.commit()
 
-    await _send_giveaway_game_notify(gid, prize, target_channel,
-                                     extra_line=f"🎁 Hosted by {interaction.user.mention} · Pot: {amount:,} coins")
+    await _send_giveaway_game_notify(
+        gid, prize, target_channel,
+        extra_line=f"🎁 Hosted by {interaction.user.mention} · Pot: {parsed_amount:,} coins")
 
     await interaction.response.send_message(
-        f"✅ Hosted giveaway started! **{amount:,}** coins deducted from your balance.\n"
-        f"{winners} winner(s) will each receive **{per_winner:,}** coins.", ephemeral=True)
-    asyncio.create_task(giveaway_timer(message.id, seconds))
+        f"✅ Hosted giveaway posted! **{parsed_amount:,}** coins deducted.\n"
+        f"{winners} winner(s) will each receive **{per_winner:,}** coins.",
+        ephemeral=True)
+    asyncio.create_task(giveaway_timer(message.id, _HOST_DURATION))
     await log_event(gid, "giveaway", _log_embed(
         "🎁 Hosted Giveaway Created", discord.Color.purple(),
-        Host=interaction.user.mention, Prize=prize, Amount=f"{amount:,}",
-        Per_Winner=f"{per_winner:,}", Winners=str(winners), Channel=target_channel.mention))
+        Host=interaction.user.mention, Prize=prize, Amount=f"{parsed_amount:,}",
+        Per_Winner=f"{per_winner:,}", Winners=str(winners),
+        Channel=target_channel.mention))
+
 
 @bot.command(name="host")
-async def pfx_host(ctx, amount: int, winners: int = 1, seconds: int = 60, *, prize: str = "Balance Giveaway"):
-    await host._callback(FakeInteraction(ctx), amount, winners, seconds, prize, None, None)
+async def pfx_host(ctx, amount: str, winners: int, *, prize: str = "Balance Giveaway"):
+    """Usage: !host <amount> <winners 3-10> [prize label]
+    Amount supports shorthand: 1k, 2.5m, 1b, etc."""
+    await host._callback(FakeInteraction(ctx), amount, winners, prize)
 
 # ═══════════════════════════════════════════════════════
 # GIVEAWAY ENGINE
