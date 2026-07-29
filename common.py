@@ -310,6 +310,45 @@ _SYSTEM_CHOICES = [
     app_commands.Choice(name="VIP Key (daily keys, vipchest command)",    value="vipkey"),
     app_commands.Choice(name="Gambling (tokens, blackjack, roulette)",    value="gamble"),
 ]
+
+# =======================================================
+# PARSE
+# =======================================================
+
+def parse_amount(text) -> int | None:
+    """
+    Convert shorthand notation to int.
+    Accepts: plain integers, floats, or suffixed strings.
+    Supported suffixes (case-insensitive):
+        k  = 1,000
+        m  = 1,000,000
+        b  = 1,000,000,000
+        t  = 1,000,000,000,000          (trillion)
+        qd  = 1,000,000,000,000,000     (quadrillion)
+        qn = 1,000,000,000,000,000,000  (quintillion)
+    Examples: "1k" → 1000, "2.5m" → 2500000, "1qn" → 10^18
+    Returns None if the string can't be parsed.
+    """
+    if isinstance(text, int): return text
+    text = str(text).strip().lower().replace(",", "").replace("_", "")
+    # longest suffix first so "qn" is tried before "q"
+    for suffix, mult in [
+        ("qn", 10**18),
+        ("qd",  10**15),
+        ("t",  10**12),
+        ("b",  10**9),
+        ("m",  10**6),
+        ("k",  10**3),
+    ]:
+        if text.endswith(suffix):
+            try:
+                return int(float(text[:-len(suffix)]) * mult)
+            except (ValueError, OverflowError):
+                return None
+    try:
+        return int(float(text))
+    except (ValueError, OverflowError):
+        return None
  
 # ═══════════════════════════════════════════════════════
 # PREFIX 
@@ -629,22 +668,32 @@ async def get_level(guild_id: int, user_id: int) -> int:
     return min((await get_level_exp(guild_id, user_id)) // LEVEL_DIVISOR + 1, 100)
  
 async def _add_chest_spending(guild_id: int, user_id: int, amount: int):
-    """Insert negative entries timestamped to match the oldest positive
-    entries they consume, so both sides expire together."""
+    """
+    Deduct EXP for opening chests by inserting a matching negative entry at
+    the SAME timestamp as the oldest positive ones, so both sides expire together.
+
+    Bug that was here before: the old version fetched raw amount>0 rows and
+    could over-consume a timestamp that already had negatives cancelling it,
+    creating a surplus of negatives that later expired and gave a huge EXP jump.
+
+    Fix: GROUP BY timestamp and use the NET available at each point.
+    HAVING SUM(amount) > 0 skips timestamps that are already fully consumed.
+    """
     week_ago = int((datetime.now(UTC) - timedelta(days=7)).timestamp())
     remaining = amount
     async with db_lock:
         async with get_db() as db:
             async with db.execute(
-                "SELECT rowid, amount, timestamp FROM exp_history "
-                "WHERE guild_id=? AND user_id=? AND timestamp>=? AND amount>0 "
+                "SELECT timestamp, SUM(amount) AS net FROM exp_history "
+                "WHERE guild_id=? AND user_id=? AND timestamp>=? "
+                "GROUP BY timestamp HAVING SUM(amount) > 0 "
                 "ORDER BY timestamp ASC",
                 (guild_id, user_id, week_ago)) as cur:
                 entries = await cur.fetchall()
-            for rowid, entry_amount, entry_ts in entries:
+            for entry_ts, net_available in entries:
                 if remaining <= 0:
                     break
-                consume = min(entry_amount, remaining)
+                consume = min(int(net_available), remaining)
                 await db.execute(
                     "INSERT INTO exp_history(guild_id,user_id,amount,timestamp,is_bonus) "
                     "VALUES(?,?,?,?,?)",
