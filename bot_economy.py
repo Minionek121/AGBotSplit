@@ -48,40 +48,27 @@ async def balance(interaction: discord.Interaction, user: discord.Member = None)
 async def pfx_balance(ctx, user: discord.Member = None):
     await balance._callback(FakeInteraction(ctx), user)
  
- 
-@bot.command(name="gift")
-async def cmd_gift(ctx, user: discord.Member, amount: int):
-    if amount <= 0: await ctx.send("❌ Amount must be > 0."); return
-    if user.id == ctx.author.id: await ctx.send("❌ You cannot gift yourself."); return
-    gid = ctx.guild.id
-    bal = await get_balance(gid, ctx.author.id)
-    if bal < amount: await ctx.send("❌ Not enough balance."); return
-    await add_balance(gid, ctx.author.id, -amount, bot=bot)
-    await add_balance(gid, user.id, amount, bot=bot)
-    await add_stat(gid, ctx.author.id, "gifted_balance", amount)
-    await ctx.send(f"💸 You gifted **{amount:,}** coins to {user.mention}!")
-    await log_event(gid, "balance", _log_embed("🎁 Gift Sent", discord.Color.green(),
-        From=ctx.author.mention, To=user.mention, Amount=f"{amount:,}"))
- 
 @bot.command(name="addbalance")
-async def cmd_addbalance(ctx, user: discord.Member, amount: int):
+async def cmd_addbalance(ctx, user: discord.Member, amount: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    await add_balance(ctx.guild.id, user.id, amount, bot=bot)
-    await ctx.send(f"✅ Added {amount:,} coins to {user.mention}.")
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0: await ctx.send("❌ Invalid amount."); return
+    await add_balance(ctx.guild.id, user.id, parsed, bot=bot)
+    await ctx.send(f"✅ Added {parsed:,} coins to {user.mention}.")
     await log_event(ctx.guild.id, "balance", _log_embed("💰 Balance Added", discord.Color.green(),
-        Admin=ctx.author.mention, User=user.mention, Amount=f"+{amount:,}"))
+        Admin=ctx.author.mention, User=user.mention, Amount=f"+{parsed:,}"))
     await log_event(ctx.guild.id, "admin", _log_embed("⚙️ addbalance", discord.Color.orange(),
-        By=ctx.author.mention, User=user.mention, Amount=f"+{amount:,}"))
- 
+        By=ctx.author.mention, User=user.mention, Amount=f"+{parsed:,}"))
+
 @bot.command(name="removebalance")
-async def cmd_removebalance(ctx, user: discord.Member, amount: int):
+async def cmd_removebalance(ctx, user: discord.Member, amount: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    await add_balance(ctx.guild.id, user.id, -amount, bot=bot)
-    await ctx.send(f"❌ Removed {amount:,} coins from {user.mention}.")
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0: await ctx.send("❌ Invalid amount."); return
+    await add_balance(ctx.guild.id, user.id, -parsed, bot=bot)
+    await ctx.send(f"❌ Removed {parsed:,} coins from {user.mention}.")
     await log_event(ctx.guild.id, "balance", _log_embed("💸 Balance Removed", discord.Color.red(),
-        Admin=ctx.author.mention, User=user.mention, Amount=f"-{amount:,}"))
-    await log_event(ctx.guild.id, "admin", _log_embed("⚙️ removebalance", discord.Color.orange(),
-        By=ctx.author.mention, User=user.mention, Amount=f"-{amount:,}"))
+        Admin=ctx.author.mention, User=user.mention, Amount=f"-{parsed:,}"))
  
 # ═══════════════════════════════════════════════════════
 # EXP / ACTIVITY RANK
@@ -105,23 +92,21 @@ async def level(interaction: discord.Interaction, user: discord.Member = None):
 async def pfx_activityrank(ctx, user: discord.Member = None):
     await level._callback(FakeInteraction(ctx), user)
  
- 
 @bot.command(name="addexp")
-async def cmd_addexp(ctx, user: discord.Member, amount: int):
+async def cmd_addexp(ctx, user: discord.Member, amount: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    if amount <= 0: await ctx.send("❌ Amount must be > 0."); return
-    await add_exp(ctx.guild.id, user.id, amount, is_bonus=True)
-    await ctx.send(f"✅ Added **{amount:,}** usable EXP to {user.mention}.")
-    await log_event(ctx.guild.id, "exp", _log_embed("⭐ Usable EXP Added", discord.Color.green(),
-        Admin=ctx.author.mention, User=user.mention, Amount=f"+{amount:,}"))
- 
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0: await ctx.send("❌ Invalid amount."); return
+    await add_exp(ctx.guild.id, user.id, parsed, is_bonus=True)
+    await ctx.send(f"✅ Added **{parsed:,}** usable EXP to {user.mention}.")
+
 @bot.command(name="removeexp")
-async def cmd_removeexp(ctx, user: discord.Member, amount: int):
+async def cmd_removeexp(ctx, user: discord.Member, amount: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
-    await add_exp(ctx.guild.id, user.id, -amount)
-    await ctx.send(f"❌ Removed {amount:,} EXP from {user.mention}.")
-    await log_event(ctx.guild.id, "exp", _log_embed("📉 EXP Removed", discord.Color.red(),
-        Admin=ctx.author.mention, User=user.mention, Amount=f"-{amount:,}"))
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0: await ctx.send("❌ Invalid amount."); return
+    await add_exp(ctx.guild.id, user.id, -parsed)
+    await ctx.send(f"❌ Removed {parsed:,} EXP from {user.mention}.")
  
 @bot.command(name="addtotalexp")
 async def cmd_addtotalexp(ctx, user: discord.Member, amount: int):
@@ -1264,70 +1249,93 @@ async def _log_prefix_command(ctx: commands.Context):
     await log_event(ctx.guild.id, "command", embed)
 
 # ── gift ─────────────────────────────────────────────────────────────────────
+@bot.command(name="gift")
+async def cmd_gift(ctx, user: discord.Member, amount: str):
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0: await ctx.send("❌ Invalid amount."); return
+    if user.id == ctx.author.id: await ctx.send("❌ You cannot gift yourself."); return
+    gid = ctx.guild.id
+    bal = await get_balance(gid, ctx.author.id)
+    if bal < parsed: await ctx.send("❌ Not enough balance."); return
+    await add_balance(gid, ctx.author.id, -parsed, bot=bot)
+    await add_balance(gid, user.id, parsed, bot=bot)
+    await add_stat(gid, ctx.author.id, "gifted_balance", parsed)
+    await ctx.send(f"💸 You gifted **{parsed:,}** coins to {user.mention}!")
+    await log_event(gid, "balance", _log_embed("🎁 Gift Sent", discord.Color.green(),
+        From=ctx.author.mention, To=user.mention, Amount=f"{parsed:,}"))
+
 @bot.tree.command(name="gift", description="Give your own coins to another user")
-@app_commands.describe(user="Who to gift to", amount="How many coins")
+@app_commands.describe(user="Who to gift to",
+                       amount="Amount — supports 1k, 1m, 1b, 1t, 1q, 1qn")
 @command_enabled()
-async def slash_gift(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
+async def slash_gift(interaction: discord.Interaction, user: discord.Member, amount: str):
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0:
+        await interaction.response.send_message("❌ Invalid amount.", ephemeral=True); return
     if user.id == interaction.user.id:
         await interaction.response.send_message("❌ You cannot gift yourself.", ephemeral=True); return
     gid = interaction.guild.id
     bal = await get_balance(gid, interaction.user.id)
-    if bal < amount:
+    if bal < parsed:
         await interaction.response.send_message("❌ Not enough balance.", ephemeral=True); return
-    await add_balance(gid, interaction.user.id, -amount, bot=bot)
-    await add_balance(gid, user.id, amount, bot=bot)
-    await add_stat(gid, interaction.user.id, "gifted_balance", amount)
-    await interaction.response.send_message(f"💸 You gifted **{amount:,}** coins to {user.mention}!")
+    await add_balance(gid, interaction.user.id, -parsed, bot=bot)
+    await add_balance(gid, user.id, parsed, bot=bot)
+    await add_stat(gid, interaction.user.id, "gifted_balance", parsed)
+    await interaction.response.send_message(f"💸 You gifted **{parsed:,}** coins to {user.mention}!")
     await log_event(gid, "balance", _log_embed("🎁 Gift Sent", discord.Color.green(),
-        From=interaction.user.mention, To=user.mention, Amount=f"{amount:,}"))
+        From=interaction.user.mention, To=user.mention, Amount=f"{parsed:,}"))
 
 # ── addbalance / removebalance ───────────────────────────────────────────────
 @bot.tree.command(name="addbalance", description="Admin: add coins to a user")
-@app_commands.describe(user="Target user", amount="Amount to add")
+@app_commands.describe(user="Target user", amount="Amount — supports 1k, 1m, 1b, etc.")
 @command_enabled()
-async def slash_addbalance(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def slash_addbalance(interaction: discord.Interaction, user: discord.Member, amount: str):
     if not await is_allowed_to_giveaway(interaction):
         await interaction.response.send_message("❌ No permission.", ephemeral=True); return
-    await add_balance(interaction.guild.id, user.id, amount, bot=bot)
-    await interaction.response.send_message(f"✅ Added {amount:,} coins to {user.mention}.")
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0:
+        await interaction.response.send_message("❌ Invalid amount.", ephemeral=True); return
+    await add_balance(interaction.guild.id, user.id, parsed, bot=bot)
+    await interaction.response.send_message(f"✅ Added {parsed:,} coins to {user.mention}.")
     await log_event(interaction.guild.id, "balance", _log_embed("💰 Balance Added", discord.Color.green(),
-        Admin=interaction.user.mention, User=user.mention, Amount=f"+{amount:,}"))
-    await log_event(interaction.guild.id, "admin", _log_embed("⚙️ addbalance", discord.Color.orange(),
-        By=interaction.user.mention, User=user.mention, Amount=f"+{amount:,}"))
+        Admin=interaction.user.mention, User=user.mention, Amount=f"+{parsed:,}"))
 
 @bot.tree.command(name="removebalance", description="Admin: remove coins from a user")
-@app_commands.describe(user="Target user", amount="Amount to remove")
+@app_commands.describe(user="Target user", amount="Amount — supports 1k, 1m, 1b, etc.")
 @command_enabled()
-async def slash_removebalance(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def slash_removebalance(interaction: discord.Interaction, user: discord.Member, amount: str):
     if not await is_allowed_to_giveaway(interaction):
         await interaction.response.send_message("❌ No permission.", ephemeral=True); return
-    await add_balance(interaction.guild.id, user.id, -amount, bot=bot)
-    await interaction.response.send_message(f"❌ Removed {amount:,} coins from {user.mention}.")
-    await log_event(interaction.guild.id, "balance", _log_embed("💸 Balance Removed", discord.Color.red(),
-        Admin=interaction.user.mention, User=user.mention, Amount=f"-{amount:,}"))
-
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0:
+        await interaction.response.send_message("❌ Invalid amount.", ephemeral=True); return
+    await add_balance(interaction.guild.id, user.id, -parsed, bot=bot)
+    await interaction.response.send_message(f"❌ Removed {parsed:,} coins from {user.mention}.")
+ 
 # ── EXP admin ────────────────────────────────────────────────────────────────
 @bot.tree.command(name="addexp", description="Admin: add usable EXP to a user")
-@app_commands.describe(user="Target user", amount="EXP to add")
+@app_commands.describe(user="Target user", amount="Amount — supports 1k, 1m, 1b, etc.")
 @command_enabled()
-async def slash_addexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def slash_addexp(interaction: discord.Interaction, user: discord.Member, amount: str):
     if not await is_allowed_to_giveaway(interaction):
         await interaction.response.send_message("❌ No permission.", ephemeral=True); return
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be > 0.", ephemeral=True); return
-    await add_exp(interaction.guild.id, user.id, amount, is_bonus=True)
-    await interaction.response.send_message(f"✅ Added **{amount:,}** usable EXP to {user.mention}.")
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0:
+        await interaction.response.send_message("❌ Invalid amount.", ephemeral=True); return
+    await add_exp(interaction.guild.id, user.id, parsed, is_bonus=True)
+    await interaction.response.send_message(f"✅ Added **{parsed:,}** usable EXP to {user.mention}.")
 
 @bot.tree.command(name="removeexp", description="Admin: remove usable EXP from a user")
-@app_commands.describe(user="Target user", amount="EXP to remove")
+@app_commands.describe(user="Target user", amount="Amount — supports 1k, 1m, 1b, etc.")
 @command_enabled()
-async def slash_removeexp(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def slash_removeexp(interaction: discord.Interaction, user: discord.Member, amount: str):
     if not await is_allowed_to_giveaway(interaction):
         await interaction.response.send_message("❌ No permission.", ephemeral=True); return
-    await add_exp(interaction.guild.id, user.id, -amount)
-    await interaction.response.send_message(f"❌ Removed {amount:,} EXP from {user.mention}.")
+    parsed = parse_amount(amount)
+    if parsed is None or parsed <= 0:
+        await interaction.response.send_message("❌ Invalid amount.", ephemeral=True); return
+    await add_exp(interaction.guild.id, user.id, -parsed)
+    await interaction.response.send_message(f"❌ Removed {parsed:,} EXP from {user.mention}.")
 
 @bot.tree.command(name="addtotalexp", description="Admin: add Total EXP (Activity Rank only, usable unchanged)")
 @app_commands.describe(user="Target user", amount="EXP to add to rank")
