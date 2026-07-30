@@ -17,7 +17,7 @@ from common import (
     DEFAULT_CHEST_PRIZES, DEFAULT_VIP_PRIZES, RARE_CHEST_PRIZES, RARE_VIP_PRIZES,
     disabled_commands, global_disabled_commands, load_disabled_commands,
     prefix_channel_rules, _prefix_channel_allowed, load_prefix_restrictions,
-    register_bot_instance,
+    register_bot_instance, parse_amount,
 )
 
 TOKEN = os.getenv("TOKEN_DROPS")
