@@ -211,7 +211,7 @@ async def pfx_giveaway(ctx, prize: str, seconds: int, winners: int = 1,
                               0, 0, 0, None, None, 1, None, None, "gold")
 
 # ═══════════════════════════════════════════════════════
-# /HOST — user-hosted balance giveaway
+# /HOST
 # ═══════════════════════════════════════════════════════
 
 @bot.tree.command(name="host",
@@ -227,13 +227,11 @@ async def host(interaction: discord.Interaction,
                winners: int,
                prize: str = "Balance Giveaway"):
 
-    # --- parse amount ---
     parsed_amount = parse_amount(amount)
     if parsed_amount is None or parsed_amount <= 0:
         await interaction.response.send_message(
             "❌ Invalid amount. Examples: `1000`, `500k`, `1m`.", ephemeral=True); return
 
-    # --- validate winners ---
     if not (_HOST_MIN_WINNERS <= winners <= _HOST_MAX_WINNERS):
         await interaction.response.send_message(
             f"❌ Winners must be between **{_HOST_MIN_WINNERS}** and **{_HOST_MAX_WINNERS}**.",
@@ -251,8 +249,7 @@ async def host(interaction: discord.Interaction,
         await interaction.response.send_message(
             f"❌ Amount ÷ winners = {per_winner} — each winner must receive at least 1 coin.",
             ephemeral=True); return
-
-    # --- fixed channel ---
+        
     target_channel = bot.get_channel(_HOST_CHANNEL_ID)
     if target_channel is None:
         await interaction.response.send_message(
