@@ -1204,7 +1204,7 @@ async def on_ready():
     except Exception as e:
         print(f"[Economy Bot] Guild sync failed: {e}")
     bot.tree.clear_commands(guild=None)
-    await bot.tree.sync()   # clears any old global commands from Discord
+    await bot.tree.sync()
 
     for g in bot.guilds:
         try:
@@ -1363,8 +1363,7 @@ async def slash_removetotalexp(interaction: discord.Interaction, user: discord.M
     if not await is_allowed_to_giveaway(interaction):
         await interaction.response.send_message("❌ No permission.", ephemeral=True); return
     await interaction.response.defer()
-    ctx_like = FakeInteraction(None)  # use the prefix logic by calling cmd directly
-    # Inline the logic rather than calling the prefix command
+    ctx_like = FakeInteraction(None)
     if amount <= 0:
         await interaction.followup.send("❌ Amount must be > 0."); return
     week_ago = int((datetime.now(UTC) - timedelta(days=7)).timestamp())
