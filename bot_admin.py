@@ -112,8 +112,6 @@ async def _process_counting(message: discord.Message):
 
     try: await message.add_reaction("✅")
     except Exception: pass
-
-    # Check special prizes
     async with get_db() as db:
         async with db.execute("SELECT prize_type,prize_value,prize_amount,label FROM counting_special_prizes "
                               "WHERE guild_id=? AND number=?", (gid, new_count)) as cur:
@@ -125,8 +123,7 @@ async def _process_counting(message: discord.Message):
         if ann_ch:
             try: await ann_ch.send(f"🎉 {message.author.mention} reached **{new_count}** and won **{label or p_value}**!")
             except Exception: pass
-
-    # Regular prizes (random draw)
+                
     async with get_db() as db:
         async with db.execute("SELECT prize_type,prize_value,prize_amount,weight_formula FROM counting_prizes WHERE guild_id=?",
                               (gid,)) as cur:
@@ -910,13 +907,11 @@ async def redeem(interaction: discord.Interaction, code: str):
     gid, uid = interaction.guild.id, interaction.user.id
     await interaction.response.defer(ephemeral=True)
 
-    # Check guild code
     async with get_db() as db:
         async with db.execute(
             "SELECT prize_json,uses_left,min_level,min_balance,required_role_id FROM redeem_codes "
             "WHERE guild_id=? AND code=?", (gid, code)) as cur:
             guild_code = await cur.fetchone()
-        # Check global code
         async with db.execute("SELECT prize_json,uses_left,min_level,min_balance FROM global_redeem_codes WHERE code=?",
                               (code,)) as cur:
             global_code = await cur.fetchone()
@@ -963,7 +958,6 @@ async def redeem(interaction: discord.Interaction, code: str):
             User=interaction.user.mention, Code=code, Reward=_prize_summary(prize)[:100]))
         return
 
-    # Global code fallback
     pj, uses_left, min_level, min_balance = global_code
     async with get_db() as db:
         async with db.execute("SELECT user_id FROM global_code_uses WHERE code=? AND user_id=?", (code, uid)) as cur:
@@ -1524,7 +1518,6 @@ async def cmd_cleanuptransfer(ctx):
                         await db.execute(f"DELETE FROM {tbl} WHERE guild_id=?", (gid,))
                     except Exception as e:
                         print(f"[Cleanup] {tbl}: {e}")
-                # Power giveaways + games + named tables
                 for tbl in ("power_giveaway_config","power_giveaway_role_entries","power_giveaway_channel_rates",
                             "power_giveaway_role_boosts","power_giveaway_user_entries",
                             "games","game_config","game_answers","game_hints"):
@@ -1536,7 +1529,7 @@ async def cmd_cleanuptransfer(ctx):
     await ctx.send(f"🗑 Cleaned up all data for **{ctx.guild.name}** (`{gid}`).")
 
 # ═══════════════════════════════════════════════════════
-# TRANSFER (owner-only, migrate guild data)
+# TRANSFER (owner-only)
 # ═══════════════════════════════════════════════════════
 
 @bot.command(name="transfer")
@@ -1599,7 +1592,6 @@ async def cmd_transfer(ctx, guild_id_from: int, guild_id_to: int):
                     except Exception as e:
                         print(f"[Transfer] {tbl}: {e}")
 
-                # Handle games + game_answers + game_hints with ID remapping
                 await db.execute("DELETE FROM games WHERE guild_id=?", (guild_id_to,))
                 await db.execute("DELETE FROM game_answers WHERE guild_id=?", (guild_id_to,))
                 await db.execute("DELETE FROM game_hints WHERE guild_id=?", (guild_id_to,))
@@ -1629,7 +1621,6 @@ async def cmd_transfer(ctx, guild_id_from: int, guild_id_to: int):
                             await db.execute("INSERT INTO game_hints(guild_id,game_name,answer_id,hint_text,hint_order) "
                                              "VALUES(?,?,?,?,?)", (guild_id_to, gname, new_aid, ht, ho))
 
-                # Abuse boxes
                 await db.execute("DELETE FROM abuse_boxes WHERE guild_id=?", (guild_id_to,))
                 await db.execute("DELETE FROM abuse_box_prizes WHERE guild_id=?", (guild_id_to,))
                 await db.execute("DELETE FROM rare_box_config WHERE guild_id=?", (guild_id_to,))
@@ -1933,7 +1924,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     guild = bot.get_guild(payload.guild_id)
     if not guild: return
 
-    # Counting bot reaction check
     if payload.user_id == COUNTING_BOT_ID and str(payload.emoji) in _COUNTING_FAIL_EMOJI:
         async with get_db() as db:
             async with db.execute("SELECT channel_id FROM counting_config WHERE guild_id=? AND enabled=1",
@@ -1956,14 +1946,12 @@ async def on_member_join(member: discord.Member):
     if member.bot: return
     gid = member.guild.id
 
-    # Cancel any pending auto-reset for this user
     async with db_lock:
         async with get_db() as db:
             await db.execute("DELETE FROM auto_reset_pending WHERE guild_id=? AND user_id=?",
                              (gid, member.id))
             await db.commit()
 
-    # Assign unverified role
     async with get_db() as db:
         async with db.execute("SELECT unverified_role_id FROM verification_config WHERE guild_id=?", (gid,)) as cur:
             vcfg = await cur.fetchone()
@@ -1973,7 +1961,6 @@ async def on_member_join(member: discord.Member):
             try: await member.add_roles(role)
             except Exception: pass
 
-    # Welcome DM
     async with get_db() as db:
         async with db.execute("SELECT enabled,message,channel_id,channel_enabled,channel_message FROM welcome_config WHERE guild_id=?",
                               (gid,)) as cur:
