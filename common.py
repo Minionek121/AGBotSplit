@@ -40,7 +40,6 @@ async def setup_database():
     async with db_lock:
         async with get_db() as db:
  
-            # ── Economy core ────────────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS balances(
                 guild_id INTEGER, user_id INTEGER, balance INTEGER DEFAULT 0,
                 PRIMARY KEY(guild_id, user_id))""")
@@ -67,7 +66,6 @@ async def setup_database():
                 guild_id INTEGER, role_id INTEGER, threshold INTEGER,
                 PRIMARY KEY(guild_id, role_id))""")
  
-            # ── Giveaways (regular + auto + host) ───────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS giveaway_roles(
                 guild_id INTEGER, role_id INTEGER)""")
             await db.execute("""CREATE TABLE IF NOT EXISTS giveaways(
@@ -99,7 +97,6 @@ async def setup_database():
             await db.execute("""CREATE TABLE IF NOT EXISTS giveaway_game_notify_config(
                 guild_id INTEGER PRIMARY KEY, channel_id INTEGER)""")
  
-            # ── Power Giveaways (multi-named) ───────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS power_giveaway_config(
                 guild_id INTEGER, name TEXT, prize TEXT, winners INTEGER DEFAULT 1,
                 interval_seconds INTEGER DEFAULT 3600, embed_channel_id INTEGER DEFAULT 0,
@@ -123,7 +120,6 @@ async def setup_database():
                 guild_id INTEGER, name TEXT, user_id INTEGER, entries REAL DEFAULT 0,
                 PRIMARY KEY(guild_id, name, user_id))""")
  
-            # ── Mega Raffle ──────────────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS mega_tickets(
                 guild_id INTEGER, user_id INTEGER, tickets INTEGER DEFAULT 0,
                 PRIMARY KEY(guild_id, user_id))""")
@@ -143,7 +139,6 @@ async def setup_database():
                 winner_id INTEGER, winner_tickets INTEGER, total_tickets INTEGER,
                 top_json TEXT, winners_json TEXT)""")
  
-            # ── Chests / boxes / rare drops ──────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS chest_prizes(
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, chest_type TEXT,
                 name TEXT, exp INTEGER DEFAULT 0, balance INTEGER DEFAULT 0, chance REAL)""")
@@ -182,11 +177,9 @@ async def setup_database():
                 guild_id INTEGER PRIMARY KEY, channel_id INTEGER,
                 interval_seconds INTEGER DEFAULT 60, hint_delays TEXT)""")
  
-            # ── Gambling ─────────────────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS daily_gamble_log(
                 guild_id INTEGER, user_id INTEGER, date TEXT, PRIMARY KEY(guild_id, user_id, date))""")
  
-            # ── Redeem codes ─────────────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS redeem_codes(
                 guild_id INTEGER, code TEXT, prize_json TEXT, uses_left INTEGER DEFAULT 1,
                 min_level INTEGER DEFAULT 0, min_balance INTEGER DEFAULT 0, required_role_id INTEGER DEFAULT 0,
@@ -199,7 +192,6 @@ async def setup_database():
             await db.execute("""CREATE TABLE IF NOT EXISTS global_code_uses(
                 code TEXT, user_id INTEGER, PRIMARY KEY(code, user_id))""")
  
-            # ── Counting ─────────────────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS counting_config(
                 guild_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 0,
                 channel_id INTEGER DEFAULT 0, announce_channel_id INTEGER DEFAULT 0)""")
@@ -216,7 +208,6 @@ async def setup_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, number INTEGER,
                 prize_type TEXT, prize_value TEXT, prize_amount INTEGER DEFAULT 0, label TEXT)""")
  
-            # ── Verification / Welcome ───────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS verification_config(
                 guild_id INTEGER PRIMARY KEY, channel_id INTEGER DEFAULT 0, message_id INTEGER DEFAULT 0,
                 verified_role_id INTEGER DEFAULT 0, unverified_role_id INTEGER DEFAULT 0, message TEXT)""")
@@ -224,7 +215,6 @@ async def setup_database():
                 guild_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 0, message TEXT,
                 channel_id INTEGER DEFAULT 0, channel_enabled INTEGER DEFAULT 0, channel_message TEXT)""")
  
-            # ── Logging / admin / system ─────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS log_channels(
                 guild_id INTEGER, log_type TEXT, channel_id INTEGER, PRIMARY KEY(guild_id, log_type))""")
             await db.execute("""CREATE TABLE IF NOT EXISTS disabled_commands_persist(
@@ -249,7 +239,6 @@ async def setup_database():
                 guild_id INTEGER, user_id INTEGER, date TEXT, count INTEGER DEFAULT 0,
                 PRIMARY KEY(guild_id, user_id, date))""")
  
-            # ── Auto-reset on leave ──────────────────────────────────────────
             await db.execute("""CREATE TABLE IF NOT EXISTS auto_reset_config(
                 guild_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 0)""")
             await db.execute("""CREATE TABLE IF NOT EXISTS auto_reset_rules(
@@ -316,22 +305,8 @@ _SYSTEM_CHOICES = [
 # =======================================================
 
 def parse_amount(text) -> int | None:
-    """
-    Convert shorthand notation to int.
-    Accepts: plain integers, floats, or suffixed strings.
-    Supported suffixes (case-insensitive):
-        k  = 1,000
-        m  = 1,000,000
-        b  = 1,000,000,000
-        t  = 1,000,000,000,000          (trillion)
-        qd  = 1,000,000,000,000,000     (quadrillion)
-        qn = 1,000,000,000,000,000,000  (quintillion)
-    Examples: "1k" → 1000, "2.5m" → 2500000, "1qn" → 10^18
-    Returns None if the string can't be parsed.
-    """
     if isinstance(text, int): return text
     text = str(text).strip().lower().replace(",", "").replace("_", "")
-    # longest suffix first so "qn" is tried before "q"
     for suffix, mult in [
         ("qn", 10**18),
         ("qd",  10**15),
@@ -360,7 +335,6 @@ def get_prefix(bot, message):
     return _BOT_PREFIX
  
 async def _load_prefix():
-    """Call from each bot's on_ready. Last one to load wins (they'll all load the same value)."""
     global _BOT_PREFIX
     async with get_db() as db:
         async with db.execute("SELECT value FROM bot_config WHERE key='prefix'") as cur:
@@ -369,7 +343,6 @@ async def _load_prefix():
         _BOT_PREFIX = row[0]
  
 async def set_prefix(new_prefix: str):
-    """Used by the owner-only /setprefix command in bot_admin."""
     global _BOT_PREFIX
     _BOT_PREFIX = new_prefix
     async with db_lock:
@@ -549,10 +522,6 @@ async def add_balance(guild_id: int, user_id: int, amount: int, bot=None):
  
  
 async def _update_balance_rank(bot: commands.Bot, guild_id: int, user_id: int):
-    """Re-evaluate which balance-rank role (if any) a user should hold, based
-    on CURRENT balance, and swap roles if needed. Logs failures visibly
-    (instead of only printing) so role-hierarchy/permission issues are easy
-    to spot."""
     async with get_db() as db:
         async with db.execute(
             "SELECT role_id, threshold FROM balance_ranks "
@@ -668,17 +637,6 @@ async def get_level(guild_id: int, user_id: int) -> int:
     return min((await get_level_exp(guild_id, user_id)) // LEVEL_DIVISOR + 1, 100)
  
 async def _add_chest_spending(guild_id: int, user_id: int, amount: int):
-    """
-    Deduct EXP for opening chests by inserting a matching negative entry at
-    the SAME timestamp as the oldest positive ones, so both sides expire together.
-
-    Bug that was here before: the old version fetched raw amount>0 rows and
-    could over-consume a timestamp that already had negatives cancelling it,
-    creating a surplus of negatives that later expired and gave a huge EXP jump.
-
-    Fix: GROUP BY timestamp and use the NET available at each point.
-    HAVING SUM(amount) > 0 skips timestamps that are already fully consumed.
-    """
     week_ago = int((datetime.now(UTC) - timedelta(days=7)).timestamp())
     remaining = amount
     async with db_lock:
@@ -807,7 +765,6 @@ async def add_tickets(guild_id, user_id, amount):
             await db.commit()
  
 def _weighted_sample_without_replacement(items_weights: list, k: int) -> list:
-    """Pick up to k unique items from [(item, weight), ...] without replacement."""
     pool = [(it, w) for it, w in items_weights if w > 0]
     chosen = []
     for _ in range(min(k, len(pool))):
@@ -967,11 +924,6 @@ def bump_msg_count(guild_id: int, user_id: int):
     _msg_buf[key] = _msg_buf.get(key, 0) + 1
  
 async def get_today_msg_count(guild_id: int, user_id: int) -> int:
-    """Combines the in-memory buffer (only non-empty in the SAME process that's
-    calling bump_msg_count — i.e. bot_admin) with whatever's been flushed to
-    the DB so far. Cross-bot reads (e.g. from bot_games) only see DB-flushed
-    counts, which lag by up to ~2 minutes — acceptable for a daily threshold
-    check."""
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     mem = _msg_buf.get((guild_id, user_id), 0) if _msg_buf_date == today else 0
     async with get_db() as db:
@@ -982,7 +934,6 @@ async def get_today_msg_count(guild_id: int, user_id: int) -> int:
     return mem + (row[0] if row else 0)
  
 async def msg_count_flush_loop(bot: commands.Bot):
-    """Run this from whichever bot calls bump_msg_count (bot_admin)."""
     await bot.wait_until_ready()
     while not bot.is_closed():
         await asyncio.sleep(120)
@@ -1051,7 +1002,6 @@ class FakeInteraction:
  
  
 class _MC:
-    """Mock app_commands.Choice."""
     def __init__(self, value: str):
         self.value = value
         self.name  = value
