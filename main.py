@@ -23,7 +23,6 @@ log.info(f"DATABASE_PATH = {os.getenv('DATABASE_PATH', 'giveaways.db (default)')
  
  
 async def run_bot(label: str, module_name: str, token: str):
-    """Import and run a single bot, logging any crash without killing the others."""
     log.info(f"[{label}] Importing module...")
     try:
         import importlib
