@@ -1211,7 +1211,7 @@ async def cmd_checkmegahistory(ctx):
     await ctx.send(embed=embed)
 
 # ═══════════════════════════════════════════════════════
-# POWER GIVEAWAYS (multi-named)
+# POWER GIVEAWAYS
 # ═══════════════════════════════════════════════════════
 
 async def _process_power_giveaway_message(message: discord.Message):
