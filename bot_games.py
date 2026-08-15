@@ -1719,7 +1719,6 @@ async def slash_listgames(interaction: discord.Interaction, game_name: str = Non
         view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
         await interaction.followup.send(embed=pages[0], view=view)
 
-# Also update prefix version to paginate
 @bot.command(name="listgames")
 async def pfx_listgames_paginated(ctx, *, game_name: str = None):
     gid = ctx.guild.id
