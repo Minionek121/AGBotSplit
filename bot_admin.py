@@ -1166,15 +1166,43 @@ async def cmd_enablecmd(ctx, *, cmd_name: str):
             await db.commit()
     await ctx.send(f"✅ Command **{cmd_name}** re-enabled.")
 
-@bot.command(name="listcmds")
-async def cmd_listcmds(ctx):
-    gid = ctx.guild.id
+@bot.tree.command(name="listcmds",
+                  description="List all disabled commands in this server and globally")
+@command_enabled()
+async def slash_listcmds(interaction: discord.Interaction):
+    gid   = interaction.guild.id
     gcmds = sorted(global_disabled_commands)
     lcmds = sorted(disabled_commands.get(gid, set()))
-    embed = discord.Embed(title="🔒 Disabled Commands", color=discord.Color.red())
-    embed.add_field(name="Globally Disabled", value="\n".join(f"• {c}" for c in gcmds) or "None", inline=False)
-    embed.add_field(name="Disabled in this Server", value="\n".join(f"• {c}" for c in lcmds) or "None", inline=False)
-    await ctx.send(embed=embed)
+    lines = []
+    if gcmds:
+        lines.append("**── Globally Disabled ──**")
+        lines += [f"• {c}" for c in gcmds]
+    if lcmds:
+        lines.append("\n**── Disabled in this Server ──**")
+        lines += [f"• {c}" for c in lcmds]
+    if not lines:
+        await interaction.response.send_message("✅ No commands are currently disabled.", ephemeral=True); return
+    pages = paginate_lines(lines, "🔒 Disabled Commands", discord.Color.red())
+    view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+    await interaction.response.send_message(embed=pages[0], view=view)
+
+@bot.command(name="listcmds")
+async def cmd_listcmds(ctx):
+    gid   = ctx.guild.id
+    gcmds = sorted(global_disabled_commands)
+    lcmds = sorted(disabled_commands.get(gid, set()))
+    lines = []
+    if gcmds:
+        lines.append("**── Globally Disabled ──**")
+        lines += [f"• {c}" for c in gcmds]
+    if lcmds:
+        lines.append("\n**── Disabled in this Server ──**")
+        lines += [f"• {c}" for c in lcmds]
+    if not lines:
+        await ctx.send("✅ No commands are currently disabled."); return
+    pages = paginate_lines(lines, "🔒 Disabled Commands", discord.Color.red())
+    for embed in pages:
+        await ctx.send(embed=embed)
 
 # ═══════════════════════════════════════════════════════
 # SYSTEM TOGGLES
