@@ -18,7 +18,7 @@ from common import (
     _SYSTEM_LABELS, _SYSTEM_CHOICES,
     disabled_commands, global_disabled_commands, load_disabled_commands,
     prefix_channel_rules, _prefix_channel_allowed, load_prefix_restrictions, set_prefix,
-    register_bot_instance, parse_amount,
+    register_bot_instance, parse_amount, EmbedPaginator, paginate_lines,
 )
 
 TOKEN = os.getenv("TOKEN_ADMIN")
@@ -2063,6 +2063,584 @@ async def _log_prefix_command(ctx: commands.Context):
     embed.set_footer(text=f"#{getattr(ctx.channel,'name','DM')} | UID: {ctx.author.id}")
     await log_event(ctx.guild.id, "command", embed)
 
+# ── Gamble tokens ─────────────────────────────────────────────────────────────
+
+@bot.tree.command(name="givegambletoken",
+                  description="Admin: give Gamble Tokens to a user")
+@app_commands.describe(user="Target user", amount="How many to give (default 1)")
+@command_enabled()
+async def slash_givegambletoken(interaction: discord.Interaction,
+                                user: discord.Member, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    await inventory_add(interaction.guild.id, user.id, GAMBLE_TOKEN, amount)
+    await interaction.response.send_message(
+        f"🎲 Gave **{amount}x {GAMBLE_TOKEN}** to {user.mention}.")
+    await log_event(interaction.guild.id, "item", _log_embed(
+        "🎲 Gamble Token Given", discord.Color.green(),
+        Admin=interaction.user.mention, User=user.mention, Tokens=str(amount)))
+
+
+@bot.tree.command(name="takegambletoken",
+                  description="Admin: take Gamble Tokens from a user")
+@app_commands.describe(user="Target user", amount="How many to take (default 1)")
+@command_enabled()
+async def slash_takegambletoken(interaction: discord.Interaction,
+                                user: discord.Member, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    if not await inventory_remove(interaction.guild.id, user.id, GAMBLE_TOKEN, amount):
+        await interaction.response.send_message(
+            f"❌ {user.mention} doesn't have {amount}x {GAMBLE_TOKEN}.", ephemeral=True); return
+    await interaction.response.send_message(
+        f"🗑 Took **{amount}x {GAMBLE_TOKEN}** from {user.mention}.")
+
+
+@bot.tree.command(name="givegambletokenrole",
+                  description="Admin: give Gamble Tokens to everyone with a role")
+@app_commands.describe(role="Target role", amount="How many per member (default 1)")
+@command_enabled()
+async def slash_givegambletokenrole(interaction: discord.Interaction,
+                                    role: discord.Role, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    await interaction.response.defer()
+    members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
+    if not members:
+        await interaction.followup.send(f"❌ No non-bot members with {role.mention}."); return
+    for m in members:
+        await inventory_add(interaction.guild.id, m.id, GAMBLE_TOKEN, amount)
+    await interaction.followup.send(
+        f"🎲 Gave **{amount}x {GAMBLE_TOKEN}** to **{len(members)}** member(s) with {role.mention}.")
+
+
+@bot.tree.command(name="takegambletokenrole",
+                  description="Admin: take Gamble Tokens from everyone with a role")
+@app_commands.describe(role="Target role", amount="How many per member (default 1)")
+@command_enabled()
+async def slash_takegambletokenrole(interaction: discord.Interaction,
+                                    role: discord.Role, amount: int = 1):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be ≥ 1.", ephemeral=True); return
+    await interaction.response.defer()
+    members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
+    if not members:
+        await interaction.followup.send(f"❌ No non-bot members with {role.mention}."); return
+    taken = skipped = 0
+    for m in members:
+        if await inventory_remove(interaction.guild.id, m.id, GAMBLE_TOKEN, amount): taken += 1
+        else: skipped += 1
+    await interaction.followup.send(
+        f"🗑 Took tokens from **{taken}** member(s) | {skipped} didn't have enough (skipped).")
+
+@bot.command(name="takegambletokenrole")
+async def cmd_takegambletokenrole(ctx, role: discord.Role, amount: int = 1):
+    if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
+    await slash_takegambletokenrole._callback(FakeInteraction(ctx), role, amount)
+
+# ── Counting commands ─────────────────────────────────────────────────────────
+
+@bot.tree.command(name="disablecounting",
+                  description="Disable the counting system in this server")
+@command_enabled()
+async def slash_disablecounting(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("UPDATE counting_config SET enabled=0 WHERE guild_id=?",
+                             (interaction.guild.id,))
+            await db.commit()
+    await interaction.response.send_message("🔒 Counting disabled.")
+
+
+@bot.tree.command(name="resetcount",
+                  description="Reset the counting channel's count to a value (default 0)")
+@app_commands.describe(value="Value to reset to (default 0)")
+@command_enabled()
+async def slash_resetcount(interaction: discord.Interaction, value: int = 0):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE counting_state SET current_count=?,last_user_id=0 WHERE guild_id=?",
+                (value, interaction.guild.id))
+            await db.commit()
+    await interaction.response.send_message(f"✅ Count reset to **{value}**.")
+
+
+@bot.tree.command(name="countingstats",
+                  description="Show the current count, record, and last counter")
+@command_enabled()
+async def slash_countingstats(interaction: discord.Interaction):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT current_count,last_user_id,record FROM counting_state WHERE guild_id=?",
+            (interaction.guild.id,)) as cur:
+            state = await cur.fetchone()
+    if not state:
+        await interaction.response.send_message("❌ Counting not configured.", ephemeral=True); return
+    count, last_uid, record = state
+    last_member = interaction.guild.get_member(last_uid) if last_uid else None
+    embed = discord.Embed(title="🔢 Counting Stats", color=discord.Color.blue())
+    embed.add_field(name="Current Count", value=str(count), inline=True)
+    embed.add_field(name="Last Counter",
+                    value=last_member.mention if last_member else "Nobody yet", inline=True)
+    embed.add_field(name="Record", value=str(record), inline=True)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="unbancounter",
+                  description="Unban a user from the counting channel")
+@app_commands.describe(user="User to unban")
+@command_enabled()
+async def slash_unbancounter(interaction: discord.Interaction, user: discord.Member):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("DELETE FROM counting_bans WHERE guild_id=? AND user_id=?",
+                             (interaction.guild.id, user.id))
+            await db.commit()
+    await interaction.response.send_message(f"✅ Unbanned {user.mention} from counting.")
+
+
+_PRIZE_TYPE_CHOICES = [
+    app_commands.Choice(name="Balance",  value="balance"),
+    app_commands.Choice(name="EXP",      value="exp"),
+    app_commands.Choice(name="Tickets",  value="tickets"),
+    app_commands.Choice(name="Item",     value="item"),
+    app_commands.Choice(name="Role",     value="role"),
+]
+
+@bot.tree.command(name="addcountingprize",
+                  description="Add a random prize awarded on correct counts")
+@app_commands.describe(
+    prize_type="Type of prize",
+    prize_value="Role ID for 'role', item name for 'item', otherwise ignored",
+    prize_amount="Amount (coins, EXP, tickets, or item qty)",
+    weight_formula="Selection weight — plain number or formula using 'count' (e.g. count/10)")
+@app_commands.choices(prize_type=_PRIZE_TYPE_CHOICES)
+@command_enabled()
+async def slash_addcountingprize(interaction: discord.Interaction, prize_type: str,
+                                 prize_amount: int, prize_value: str = "0",
+                                 weight_formula: str = "1"):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO counting_prizes(guild_id,prize_type,prize_value,prize_amount,weight_formula) "
+                "VALUES(?,?,?,?,?)",
+                (interaction.guild.id, prize_type, prize_value, prize_amount, weight_formula))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Added counting prize: `{prize_type}` — **{prize_value or prize_amount}** "
+        f"×{prize_amount} | weight: `{weight_formula}`")
+
+
+@bot.tree.command(name="removecountingprize",
+                  description="Remove a counting prize by its ID")
+@app_commands.describe(prize_id="Prize ID from /listcountingprizes")
+@command_enabled()
+async def slash_removecountingprize(interaction: discord.Interaction, prize_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM counting_prizes WHERE id=? AND guild_id=?",
+                (prize_id, interaction.guild.id)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(
+                        f"❌ Prize #{prize_id} not found.", ephemeral=True); return
+            await db.execute("DELETE FROM counting_prizes WHERE id=?", (prize_id,))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed counting prize #{prize_id}.")
+
+
+@bot.tree.command(name="addspecialprize",
+                  description="Add a prize awarded at a specific count milestone")
+@app_commands.describe(
+    number="The exact count that triggers this prize",
+    prize_type="Type of prize",
+    prize_amount="Amount (coins, EXP, tickets, or item qty)",
+    prize_value="Role ID for 'role', item name for 'item'",
+    label="Display name shown in the announcement")
+@app_commands.choices(prize_type=_PRIZE_TYPE_CHOICES)
+@command_enabled()
+async def slash_addspecialprize(interaction: discord.Interaction, number: int,
+                                prize_type: str, prize_amount: int,
+                                prize_value: str = "0", label: str = None):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO counting_special_prizes"
+                "(guild_id,number,prize_type,prize_value,prize_amount,label) VALUES(?,?,?,?,?,?)",
+                (interaction.guild.id, number, prize_type, prize_value, prize_amount, label))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Special prize at **{number}**: `{prize_type}` — **{label or prize_value}** ×{prize_amount}")
+
+
+@bot.tree.command(name="removespecialprize",
+                  description="Remove a milestone counting prize by its ID")
+@app_commands.describe(prize_id="Prize ID from /listcountingprizes")
+@command_enabled()
+async def slash_removespecialprize(interaction: discord.Interaction, prize_id: int):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM counting_special_prizes WHERE id=? AND guild_id=?",
+                (prize_id, interaction.guild.id)) as cur:
+                if not await cur.fetchone():
+                    await interaction.response.send_message(
+                        f"❌ Prize #{prize_id} not found.", ephemeral=True); return
+            await db.execute("DELETE FROM counting_special_prizes WHERE id=?", (prize_id,))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed special prize #{prize_id}.")
+
+
+@bot.tree.command(name="listcountingprizes",
+                  description="List all counting prizes and milestones")
+@command_enabled()
+async def slash_listcountingprizes(interaction: discord.Interaction):
+    await interaction.response.defer()
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id,prize_type,prize_value,prize_amount,weight_formula "
+            "FROM counting_prizes WHERE guild_id=?", (interaction.guild.id,)) as cur:
+            regular = await cur.fetchall()
+        async with db.execute(
+            "SELECT id,number,prize_type,prize_value,prize_amount,label "
+            "FROM counting_special_prizes WHERE guild_id=? ORDER BY number",
+            (interaction.guild.id,)) as cur:
+            specials = await cur.fetchall()
+    lines = []
+    if regular:
+        lines.append("**── Regular Prizes ──**")
+        for pid, pt, pv, pa, wf in regular:
+            lines.append(f"`#{pid}` {pt}: **{pv or pa}** ×{pa} | weight: `{wf}`")
+    if specials:
+        lines.append("\n**── Milestone Prizes ──**")
+        for pid, n, pt, pv, pa, label in specials:
+            lines.append(f"`#{pid}` At **{n}**: {pt}: **{label or pv}** ×{pa}")
+    if not lines:
+        await interaction.followup.send("❌ No counting prizes configured."); return
+    pages = paginate_lines(lines, "🎁 Counting Prizes", discord.Color.blue())
+    view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+    await interaction.followup.send(embed=pages[0], view=view)
+
+
+# ── System status ─────────────────────────────────────────────────────────────
+
+@bot.tree.command(name="systemstatus",
+                  description="Show which systems are enabled or disabled in this server")
+@command_enabled()
+async def slash_systemstatus(interaction: discord.Interaction):
+    gid = interaction.guild.id
+    embed = discord.Embed(title="⚙️ System Status", color=discord.Color.blurple())
+    for key, label in _SYSTEM_LABELS.items():
+        enabled = await is_system_enabled(gid, key)
+        embed.add_field(name=label,
+                        value="✅ Enabled" if enabled else "🔒 Disabled",
+                        inline=True)
+    await interaction.response.send_message(embed=embed)
+
+
+# ── Prefix channel restrictions ───────────────────────────────────────────────
+
+@bot.tree.command(name="disableprefixchannel",
+                  description="Block prefix commands in a channel (optionally for a specific role only)")
+@app_commands.describe(channel="Channel to restrict",
+                       role="Only block this role (leave blank to block everyone)")
+@command_enabled()
+async def slash_disableprefixchannel(interaction: discord.Interaction,
+                                     channel: discord.TextChannel,
+                                     role: discord.Role = None):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    rid = role.id if role else 0
+    key = (interaction.guild.id, channel.id)
+    prefix_channel_rules.setdefault(key, {})[rid] = False
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO prefix_restrictions VALUES(?,?,?,?)",
+                             (interaction.guild.id, channel.id, rid, 0))
+            await db.commit()
+    scope = f" for {role.mention}" if role else " for everyone"
+    await interaction.response.send_message(
+        f"🔒 Prefix commands disabled in {channel.mention}{scope}.")
+
+
+@bot.tree.command(name="enableprefixchannel",
+                  description="Allow a role to use prefix commands in a restricted channel")
+@app_commands.describe(channel="Channel to update",
+                       role="Role to allow (leave blank to allow everyone)")
+@command_enabled()
+async def slash_enableprefixchannel(interaction: discord.Interaction,
+                                    channel: discord.TextChannel,
+                                    role: discord.Role = None):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    rid = role.id if role else 0
+    key = (interaction.guild.id, channel.id)
+    prefix_channel_rules.setdefault(key, {})[rid] = True
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO prefix_restrictions VALUES(?,?,?,?)",
+                             (interaction.guild.id, channel.id, rid, 1))
+            await db.commit()
+    scope = f" for {role.mention}" if role else " for everyone"
+    await interaction.response.send_message(
+        f"✅ Prefix commands allowed in {channel.mention}{scope}.")
+
+
+@bot.tree.command(name="resetprefixchannel",
+                  description="Clear all prefix restrictions for a channel")
+@app_commands.describe(channel="Channel to clear restrictions for")
+@command_enabled()
+async def slash_resetprefixchannel(interaction: discord.Interaction,
+                                   channel: discord.TextChannel):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    key = (interaction.guild.id, channel.id)
+    prefix_channel_rules.pop(key, None)
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM prefix_restrictions WHERE guild_id=? AND channel_id=?",
+                (interaction.guild.id, channel.id))
+            await db.commit()
+    await interaction.response.send_message(
+        f"✅ Prefix restrictions cleared for {channel.mention}.")
+
+
+@bot.tree.command(name="listprefixchannels",
+                  description="List all channels with prefix command restrictions")
+@command_enabled()
+async def slash_listprefixchannels(interaction: discord.Interaction):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT channel_id,role_id,allowed FROM prefix_restrictions WHERE guild_id=?",
+            (interaction.guild.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await interaction.response.send_message("❌ No prefix restrictions set.", ephemeral=True); return
+    lines = []
+    for cid, rid, allowed in rows:
+        ch      = interaction.guild.get_channel(cid)
+        ch_str  = ch.mention if ch else f"<#{cid}>"
+        r       = interaction.guild.get_role(rid) if rid else None
+        role_str = f"{r.mention}" if r else "everyone"
+        status   = "✅ Allowed" if allowed else "🔒 Blocked"
+        lines.append(f"• {ch_str} | {role_str} → {status}")
+    pages = paginate_lines(lines, "🔒 Prefix Restrictions", discord.Color.orange())
+    view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+    await interaction.response.send_message(embed=pages[0], view=view)
+
+
+# ── setprefix ─────────────────────────────────────────────────────────────────
+
+@bot.tree.command(name="setprefix",
+                  description="Owner only: change the bot command prefix")
+@app_commands.describe(new_prefix="The new prefix character(s)")
+@command_enabled()
+async def slash_setprefix(interaction: discord.Interaction, new_prefix: str):
+    if interaction.user.id != BOT_OWNER_ID:
+        await interaction.response.send_message("❌ Owner only.", ephemeral=True); return
+    await set_prefix(new_prefix)
+    await interaction.response.send_message(f"✅ Prefix updated to `{new_prefix}`.", ephemeral=True)
+
+
+# ── Auto-reset commands ───────────────────────────────────────────────────────
+
+@bot.tree.command(name="enableautoreset",
+                  description="Enable automatic data-reset when a member leaves")
+@command_enabled()
+async def slash_enableautoreset(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO auto_reset_config VALUES(?,1)",
+                             (interaction.guild.id,))
+            await db.commit()
+    await interaction.response.send_message("✅ Auto-reset on leave enabled.")
+
+
+@bot.tree.command(name="disableautoreset",
+                  description="Disable automatic data-reset when a member leaves")
+@command_enabled()
+async def slash_disableautoreset(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE auto_reset_config SET enabled=0 WHERE guild_id=?",
+                (interaction.guild.id,))
+            await db.commit()
+    await interaction.response.send_message("🔒 Auto-reset on leave disabled.")
+
+
+_RESET_TYPE_CHOICES = [
+    app_commands.Choice(name=t.title(), value=t)
+    for t in ("balance","exp","inventory","tickets","stats","all")
+]
+
+@bot.tree.command(name="setautoresetrule",
+                  description="Set what gets reset (and when) after a member leaves")
+@app_commands.describe(
+    reset_type="What to reset",
+    delay_seconds="Seconds after leaving before the reset fires (0 = immediately)")
+@app_commands.choices(reset_type=_RESET_TYPE_CHOICES)
+@command_enabled()
+async def slash_setautoresetrule(interaction: discord.Interaction,
+                                 reset_type: str, delay_seconds: int = 0):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    if delay_seconds < 0:
+        await interaction.response.send_message("❌ Delay must be ≥ 0.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute("INSERT OR REPLACE INTO auto_reset_rules VALUES(?,?,?)",
+                             (interaction.guild.id, reset_type, delay_seconds))
+            await db.commit()
+    delay_str = f"after {delay_seconds}s" if delay_seconds else "immediately"
+    await interaction.response.send_message(
+        f"✅ **{reset_type}** will be reset {delay_str} when a member leaves.")
+
+
+@bot.tree.command(name="removeautoresetrule",
+                  description="Remove an auto-reset rule")
+@app_commands.describe(reset_type="Which rule to remove")
+@app_commands.choices(reset_type=_RESET_TYPE_CHOICES)
+@command_enabled()
+async def slash_removeautoresetrule(interaction: discord.Interaction, reset_type: str):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM auto_reset_rules WHERE guild_id=? AND reset_type=?",
+                (interaction.guild.id, reset_type))
+            await db.commit()
+    await interaction.response.send_message(f"🗑 Removed auto-reset rule for **{reset_type}**.")
+
+
+@bot.tree.command(name="listautoresetrules",
+                  description="Show the current auto-reset configuration")
+@command_enabled()
+async def slash_listautoresetrules(interaction: discord.Interaction):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT enabled FROM auto_reset_config WHERE guild_id=?",
+            (interaction.guild.id,)) as cur:
+            cfg = await cur.fetchone()
+        async with db.execute(
+            "SELECT reset_type,delay_seconds FROM auto_reset_rules "
+            "WHERE guild_id=? ORDER BY reset_type", (interaction.guild.id,)) as cur:
+            rules = await cur.fetchall()
+    status = "✅ Enabled" if (cfg and cfg[0]) else "🔒 Disabled"
+    embed  = discord.Embed(title="🔄 Auto-Reset on Leave", color=discord.Color.orange())
+    embed.add_field(name="Status", value=status, inline=False)
+    if rules:
+        lines = [f"• **{rt}** — {'immediately' if ds == 0 else f'after {ds}s'}"
+                 for rt, ds in rules]
+        embed.add_field(name="Rules", value="\n".join(lines), inline=False)
+    else:
+        embed.add_field(name="Rules", value="No rules configured.", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+
+# ── Reset user / role ─────────────────────────────────────────────────────────
+
+@bot.tree.command(name="resetuser",
+                  description="Admin: manually reset a user's data")
+@app_commands.describe(user="User to reset",
+                       reset_type="What to reset (default: all)")
+@app_commands.choices(reset_type=_RESET_TYPE_CHOICES)
+@command_enabled()
+async def slash_resetuser(interaction: discord.Interaction,
+                          user: discord.Member, reset_type: str = "all"):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await _do_reset(interaction.guild.id, user.id, reset_type)
+    await interaction.response.send_message(
+        f"🔄 Reset **{reset_type}** for {user.mention}.")
+    await log_event(interaction.guild.id, "admin", _log_embed(
+        "🔄 User Reset", discord.Color.orange(),
+        Admin=interaction.user.mention, User=user.mention, Type=reset_type))
+
+
+@bot.tree.command(name="resetrole",
+                  description="Admin: reset data for all members with a role")
+@app_commands.describe(role="Role whose members will be reset",
+                       reset_type="What to reset (default: all)")
+@app_commands.choices(reset_type=_RESET_TYPE_CHOICES)
+@command_enabled()
+async def slash_resetrole(interaction: discord.Interaction,
+                          role: discord.Role, reset_type: str = "all"):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    await interaction.response.defer()
+    members = [m for m in interaction.guild.members if role in m.roles and not m.bot]
+    if not members:
+        await interaction.followup.send(f"❌ No non-bot members with {role.mention}."); return
+    for m in members:
+        await _do_reset(interaction.guild.id, m.id, reset_type)
+    await interaction.followup.send(
+        f"🔄 Reset **{reset_type}** for **{len(members)}** member(s) with {role.mention}.")
+    await log_event(interaction.guild.id, "admin", _log_embed(
+        "🔄 Role Reset", discord.Color.orange(),
+        Admin=interaction.user.mention, Role=role.name,
+        Type=reset_type, Count=str(len(members))))
+
+
+# ── Welcome disable ───────────────────────────────────────────────────────────
+
+@bot.tree.command(name="disablewelcome",
+                  description="Disable the DM welcome message for new members")
+@command_enabled()
+async def slash_disablewelcome(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE welcome_config SET enabled=0 WHERE guild_id=?",
+                (interaction.guild.id,))
+            await db.commit()
+    await interaction.response.send_message("🔒 Welcome DM disabled.")
+
+
+@bot.tree.command(name="disablewelcomechannel",
+                  description="Disable the channel welcome message for new members")
+@command_enabled()
+async def slash_disablewelcomechannel(interaction: discord.Interaction):
+    if not await is_allowed_to_giveaway(interaction):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True); return
+    async with db_lock:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE welcome_config SET channel_enabled=0 WHERE guild_id=?",
+                (interaction.guild.id,))
+            await db.commit()
+    await interaction.response.send_message("🔒 Welcome channel message disabled.")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
