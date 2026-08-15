@@ -1005,3 +1005,60 @@ class _MC:
     def __init__(self, value: str):
         self.value = value
         self.name  = value
+
+
+# ═══════════════════════════════════════════════════════
+# PAGEINATION 
+# ═══════════════════════════════════════════════════════
+
+class EmbedPaginator(discord.ui.View):
+
+    def __init__(self, pages: list[discord.Embed], caller_id: int, timeout: int = 120):
+        super().__init__(timeout=timeout)
+        self.pages     = pages
+        self.caller_id = caller_id
+        self.current   = 0
+        self._sync()
+
+    def _sync(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                if item.label == "◀": item.disabled = self.current == 0
+                elif item.label == "▶": item.disabled = self.current >= len(self.pages) - 1
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, disabled=True)
+    async def prev_page(self, interaction: discord.Interaction, btn):
+        if interaction.user.id != self.caller_id:
+            await interaction.response.send_message("❌ Not your list.", ephemeral=True); return
+        self.current -= 1; self._sync()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, btn):
+        if interaction.user.id != self.caller_id:
+            await interaction.response.send_message("❌ Not your list.", ephemeral=True); return
+        self.current += 1; self._sync()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    async def on_timeout(self):
+        for item in self.children: item.disabled = True
+
+
+def paginate_lines(lines: list[str], title: str, color: discord.Color,
+                   per_page: int = 20, max_chars: int = 3800) -> list[discord.Embed]:
+    """Split a list of text lines into paginated embeds, respecting both
+    line count and character limits."""
+    pages: list[discord.Embed] = []
+    chunk: list[str] = []
+    char_count = 0
+    for line in lines:
+        if (len(chunk) >= per_page or char_count + len(line) > max_chars) and chunk:
+            pages.append(discord.Embed(title=title, description="\n".join(chunk), color=color))
+            chunk = []; char_count = 0
+        chunk.append(line); char_count += len(line) + 1
+    if chunk:
+        pages.append(discord.Embed(title=title, description="\n".join(chunk), color=color))
+    total = len(pages)
+    for i, embed in enumerate(pages):
+        embed.set_footer(text=f"Page {i+1}/{total}")
+    return pages if pages else [discord.Embed(title=title, description="No entries.", color=color)]
