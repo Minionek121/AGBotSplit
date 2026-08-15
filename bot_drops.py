@@ -17,7 +17,7 @@ from common import (
     DEFAULT_CHEST_PRIZES, DEFAULT_VIP_PRIZES, RARE_CHEST_PRIZES, RARE_VIP_PRIZES,
     disabled_commands, global_disabled_commands, load_disabled_commands,
     prefix_channel_rules, _prefix_channel_allowed, load_prefix_restrictions,
-    register_bot_instance, parse_amount,
+    register_bot_instance, parse_amount, EmbedPaginator, paginate_lines,
 )
 
 TOKEN = os.getenv("TOKEN_DROPS")
@@ -1951,6 +1951,91 @@ async def slash_givekeyrole(interaction: discord.Interaction, role: discord.Role
         await inventory_add(interaction.guild.id, m.id, VIP_CHEST_KEY, amount)
     await interaction.followup.send(
         f"🔑 Gave **{amount}x {VIP_CHEST_KEY}** to **{len(members)}** member(s) with {role.mention}.")
+
+_CHEST_TYPE_DESC_CHOICES = [
+    app_commands.Choice(name="EXP Chest",  value="chest"),
+    app_commands.Choice(name="VIP Chest",  value="vipchest"),
+]
+
+@bot.tree.command(name="listchestprizes",
+                  description="List all prizes in the EXP or VIP chest loot table")
+@app_commands.describe(chest_type="Which chest to list")
+@app_commands.choices(chest_type=_CHEST_TYPE_DESC_CHOICES)
+@command_enabled()
+async def slash_listchestprizes(interaction: discord.Interaction, chest_type: str = "chest"):
+    await interaction.response.defer()
+    prizes  = await get_chest_prizes(interaction.guild.id, chest_type)
+    total_w = sum(p["chance"] for p in prizes)
+    is_custom = any("id" in p for p in prizes)
+    lines = []
+    for p in prizes:
+        pct  = (p["chance"] / total_w * 100) if total_w > 0 else 0
+        desc = []
+        if p["exp"] > 0:     desc.append(f"⭐{p['exp']:,}")
+        if p["balance"] > 0: desc.append(f"💰{p['balance']:,}")
+        if not desc:         desc.append("✨Special")
+        id_str = f"`#{p['id']}` " if "id" in p else ""
+        lines.append(f"{id_str}**{p['name']}** — {' + '.join(desc)} — **{pct:.1f}%** (w:{p['chance']})")
+    title = "📦 EXP Chest Prizes" if chest_type == "chest" else "💎 VIP Chest Prizes"
+    pages = paginate_lines(lines, title, discord.Color.purple())
+    if not is_custom:
+        pages[0].set_footer(text=f"Using default prizes — Page 1/{len(pages)}")
+    view = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+    await interaction.followup.send(embed=pages[0], view=view)
+
+@bot.command(name="listchestprizes")
+async def cmd_listchestprizes(ctx, chest_type: str = "chest"):
+    if chest_type not in ("chest","vipchest"): await ctx.send("❌ Use `chest` or `vipchest`."); return
+    prizes  = await get_chest_prizes(ctx.guild.id, chest_type)
+    total_w = sum(p["chance"] for p in prizes)
+    is_custom = any("id" in p for p in prizes)
+    lines = []
+    for p in prizes:
+        pct  = (p["chance"] / total_w * 100) if total_w > 0 else 0
+        desc = []
+        if p["exp"] > 0:     desc.append(f"⭐{p['exp']:,}")
+        if p["balance"] > 0: desc.append(f"💰{p['balance']:,}")
+        if not desc:         desc.append("✨Special")
+        id_str = f"`#{p['id']}` " if "id" in p else ""
+        lines.append(f"{id_str}**{p['name']}** — {' + '.join(desc)} — **{pct:.1f}%** (w:{p['chance']})")
+    title = "📦 EXP Chest Prizes" if chest_type == "chest" else "💎 VIP Chest Prizes"
+    pages = paginate_lines(lines, title, discord.Color.purple())
+    if not is_custom:
+        pages[0].set_footer(text=f"Using default prizes — Page 1/{len(pages)}")
+    for embed in pages:
+        await ctx.send(embed=embed)
+
+
+@bot.tree.command(name="checkmegahistory",
+                  description="View the last 10 daily Mega Raffle draws")
+@command_enabled()
+async def slash_checkmegahistory(interaction: discord.Interaction):
+    await interaction.response.defer()
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT draw_timestamp,winner_id,winner_tickets,total_tickets,top_json,winners_json "
+            "FROM mega_history WHERE guild_id=? ORDER BY draw_timestamp DESC LIMIT 10",
+            (interaction.guild.id,)) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        await interaction.followup.send("❌ No mega raffle history yet."); return
+    lines = []
+    for ts, wid, wt, tot, tj, wj in rows:
+        draw_dt  = datetime.fromtimestamp(ts, UTC)
+        date_str = draw_dt.strftime("%Y-%m-%d %H:%M UTC")
+        try:    winners_list = json.loads(wj) if wj else [[wid, None]]
+        except: winners_list = [[wid, None]]
+        names = []
+        for w_uid, w_amt in winners_list:
+            m  = interaction.guild.get_member(w_uid)
+            nm = m.display_name if m else "*[Left Server]*"
+            names.append(nm + (f" (+{w_amt:,})" if w_amt else ""))
+        lines.append(f"🗓 **{date_str}**")
+        lines.append(f"🏆 {', '.join(names)}")
+        lines.append(f"📊 Pool: {tot:,} tickets\n")
+    pages = paginate_lines(lines, "📜 Recent Mega Raffle Draws", discord.Color.gold(), per_page=30)
+    view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+    await interaction.followup.send(embed=pages[0], view=view)
 
 if __name__ == "__main__":
     bot.run(TOKEN)
