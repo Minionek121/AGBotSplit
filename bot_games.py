@@ -17,7 +17,7 @@ from common import (
     VIP_CHEST_KEY, GAMBLE_TOKEN,
     disabled_commands, global_disabled_commands, load_disabled_commands,
     prefix_channel_rules, _prefix_channel_allowed, load_prefix_restrictions,
-    register_bot_instance, parse_amount,
+    register_bot_instance, parse_amount, EmbedPaginator, paginate_lines,
 )
 
 _HOST_CHANNEL_ID = 1527412254746742784
@@ -1681,8 +1681,9 @@ async def pfx_removegameanswer(ctx, *, args: str):
     await slash_removegameanswer._callback(FakeInteraction(ctx), game_name, answer_id)
 
 
-@bot.tree.command(name="listgames", description="List all games, or answers for a specific game")
-@app_commands.describe(game_name="Leave blank to list all games, or enter a name to see its answers")
+@bot.tree.command(name="listgames",
+                  description="List all games, or answers for a specific game")
+@app_commands.describe(game_name="Leave blank to list all games; enter a name to see its answers")
 @command_enabled()
 async def slash_listgames(interaction: discord.Interaction, game_name: str = None):
     await interaction.response.defer()
@@ -1699,8 +1700,9 @@ async def slash_listgames(interaction: discord.Interaction, game_name: str = Non
         for gname, enabled, rb, re, chance, atime in games:
             status = "✅" if enabled else "🔒"
             lines.append(f"{status} **{gname}** | 💰{rb:,} ⭐{re:,} | ⚖️{chance} ⏱{atime}s")
-        embed = discord.Embed(title="🎮 Random Games", description="\n".join(lines), color=discord.Color.teal())
-        await interaction.followup.send(embed=embed)
+        pages = paginate_lines(lines, "🎮 Random Games", discord.Color.teal())
+        view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+        await interaction.followup.send(embed=pages[0], view=view)
     else:
         async with get_db() as db:
             async with db.execute(
@@ -1710,12 +1712,42 @@ async def slash_listgames(interaction: discord.Interaction, game_name: str = Non
                 (gid, game_name)) as cur:
                 answers = await cur.fetchall()
         if not answers:
-            await interaction.followup.send(f"❌ No answers for **{game_name}** (or game not found)."); return
+            await interaction.followup.send(
+                f"❌ No answers for **{game_name}** (or game not found)."); return
         lines = [f"`#{aid}` {'🔔'*hc if hc else '·'} {ans}" for aid, ans, hc in answers]
-        text = "\n".join(lines)
-        if len(text) > 1900: text = text[:1900] + "..."
-        embed = discord.Embed(title=f"🎯 {game_name}", description=text, color=discord.Color.teal())
-        await interaction.followup.send(embed=embed)
+        pages = paginate_lines(lines, f"🎯 {game_name}", discord.Color.teal())
+        view  = EmbedPaginator(pages, interaction.user.id) if len(pages) > 1 else None
+        await interaction.followup.send(embed=pages[0], view=view)
+
+# Also update prefix version to paginate
+@bot.command(name="listgames")
+async def pfx_listgames_paginated(ctx, *, game_name: str = None):
+    gid = ctx.guild.id
+    if game_name is None:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT game_name,enabled,reward_balance,reward_exp,chance,answer_time "
+                "FROM games WHERE guild_id=?", (gid,)) as cur:
+                games = await cur.fetchall()
+        if not games: await ctx.send("❌ No games configured."); return
+        lines = []
+        for gname, enabled, rb, re, chance, atime in games:
+            status = "✅" if enabled else "🔒"
+            lines.append(f"{status} **{gname}** | 💰{rb:,} ⭐{re:,} | ⚖️{chance} ⏱{atime}s")
+        pages = paginate_lines(lines, "🎮 Random Games", discord.Color.teal())
+        for embed in pages: await ctx.send(embed=embed)
+    else:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT a.id,a.answer,COUNT(h.id) FROM game_answers a "
+                "LEFT JOIN game_hints h ON h.answer_id=a.id AND h.guild_id=a.guild_id "
+                "WHERE a.guild_id=? AND a.game_name=? GROUP BY a.id ORDER BY a.id",
+                (gid, game_name)) as cur:
+                answers = await cur.fetchall()
+        if not answers: await ctx.send(f"❌ No answers for **{game_name}**."); return
+        lines = [f"`#{aid}` {'🔔'*hc if hc else '·'} {ans}" for aid, ans, hc in answers]
+        pages = paginate_lines(lines, f"🎯 {game_name}", discord.Color.teal())
+        for embed in pages: await ctx.send(embed=embed)
 
 
 @bot.tree.command(name="addhint", description="Add or replace a hint for a specific answer")
@@ -1833,10 +1865,6 @@ async def pfx_enablegame_new(ctx, *, name: str):
 async def pfx_disablegame_new(ctx, *, name: str):
     if not await _is_allowed_ctx(ctx): await ctx.send("❌ No permission."); return
     await slash_disablegame._callback(FakeInteraction(ctx), name)
-
-@bot.command(name="listgames")
-async def pfx_listgames_new(ctx, *, game_name: str = None):
-    await slash_listgames._callback(FakeInteraction(ctx), game_name)
 
 @bot.command(name="listhints")
 async def pfx_listhints_new(ctx, *, game_name: str):
