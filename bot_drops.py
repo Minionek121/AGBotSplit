@@ -126,27 +126,6 @@ async def pfx_removechestprize(ctx, chest_type: str, prize_id: int):
     await removechestprize._callback(FakeInteraction(ctx), chest_type, prize_id)
 
 
-@bot.command(name="listchestprizes")
-async def cmd_listchestprizes(ctx, chest_type: str = "chest"):
-    if chest_type not in ("chest","vipchest"): await ctx.send("❌ Use `chest` or `vipchest`."); return
-    prizes = await get_chest_prizes(ctx.guild.id, chest_type)
-    total_w = sum(p["chance"] for p in prizes)
-    is_custom = any("id" in p for p in prizes)
-    embed = discord.Embed(title=f"{'📦 EXP' if chest_type=='chest' else '💎 VIP'} Chest Prizes", color=discord.Color.purple())
-    if not is_custom: embed.set_footer(text="Using default prizes. Use /addchestprize to customise.")
-    lines = []
-    for p in prizes:
-        pct = (p["chance"] / total_w * 100) if total_w > 0 else 0
-        desc = []
-        if p["exp"] > 0: desc.append(f"⭐{p['exp']:,}")
-        if p["balance"] > 0: desc.append(f"💰{p['balance']:,}")
-        if not desc: desc.append("✨Special")
-        id_str = f"`#{p['id']}` " if "id" in p else ""
-        lines.append(f"{id_str}**{p['name']}** — {' + '.join(desc)} — **{pct:.1f}%** (w:{p['chance']})")
-    embed.description = "\n".join(lines)
-    await ctx.send(embed=embed)
-
-
 @bot.tree.command(name="addrarechestdrop", description="Mark a chest prize as a rare drop")
 @app_commands.describe(chest_type="Which chest", prize="Prize name or numeric ID from /listchestprizes")
 @app_commands.choices(chest_type=_CHEST_CHOICES)
